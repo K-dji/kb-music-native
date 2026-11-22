@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   FlatList,
   Image,
   Modal,
@@ -14,10 +15,10 @@ import {
   useWindowDimensions
 } from 'react-native';
 import { State, usePlaybackState, useProgress } from 'react-native-track-player';
-import type { Access, AppConfig, Friend, Profile, Track, TrackSource } from './src/types';
+import type { Access, AppConfig, Profile, Track, TrackSource } from './src/types';
 import { ACCESS_META, type LyricLine } from './src/types';
 import { DEFAULT_CONFIG, accessOf, searchAll, sourceAccess, sourceDuration } from './src/sources';
-import { Storage, makeMusicCode } from './src/storage';
+import { Storage } from './src/storage';
 import { fetchLrc, lyricIndexAt, parseLrc } from './src/lrc';
 import { playTrack as enginePlay, seekTo, setupPlayer, togglePlayPause } from './src/player';
 
@@ -67,30 +68,38 @@ function App(): React.JSX.Element {
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [cfg, setCfg] = useState<AppConfig>(DEFAULT_CONFIG);
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [friends, setFriends] = useState<Friend[]>([]);
   const [favorites, setFavorites] = useState<string[]>([]);
   const [queueKeys, setQueueKeys] = useState<string[]>([]);
   const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
   const [playerOpen, setPlayerOpen] = useState(false);
   const [lyrics, setLyrics] = useState<LyricLine[]>([]);
   const [detailTrack, setDetailTrack] = useState<Track | null>(null);
-  const [friendInput, setFriendInput] = useState('');
   const [nickInput, setNickInput] = useState('');
   const searchSeq = useRef(0);
+  const spin = useRef(new Animated.Value(0)).current;
+  const [vinylMode, setVinylMode] = useState(true);
   const playState = usePlaybackState();
   const { position, duration } = useProgress(500);
   const isPlaying = playState.state === State.Playing;
+  useEffect(() => {
+    if (isPlaying && vinylMode) {
+      Animated.loop(Animated.timing(spin, { toValue: 1, duration: 18000, useNativeDriver: true })).start();
+    } else {
+      spin.stopAnimation();
+    }
+  }, [isPlaying, vinylMode, spin]);
+  const spinAngle = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
 
   useEffect(() => {
     let alive = true;
     (async () => {
       await setupPlayer().catch(() => undefined);
-      const [c, p, f, fav, q] = await Promise.all([
-        Storage.loadConfig(), Storage.loadProfile(), Storage.loadFriends(),
+      const [c, p, fav, q] = await Promise.all([
+        Storage.loadConfig(), Storage.loadProfile(),
         Storage.loadFavorites(), Storage.loadQueue()
       ]);
       if (!alive) return;
-      setCfg(c); setProfile(p); setFriends(f); setFavorites(fav); setQueueKeys(q);
+      setCfg(c); setProfile(p); setFavorites(fav); setQueueKeys(q);
       setNickInput(p.nickname);
     })();
     return () => { alive = false; };
@@ -151,35 +160,12 @@ function App(): React.JSX.Element {
     Alert.alert('已加入队列', `《${track.title}》已保存到本机播放队列。`);
   }, []);
 
-  const addFriend = useCallback(() => {
-    const code = friendInput.trim().toLowerCase();
-    if (!/^kbmusic-[a-z0-9]{4,12}$/.test(code)) {
-      Alert.alert('格式不正确', '音乐符格式为 kbmusic-XXXXXX');
-      return;
-    }
-    if (friends.some(f => f.code === code)) { Alert.alert('已存在', '该好友已在列表中。'); return; }
-    const next = [...friends, { code, nickname: code.slice(8), addedAt: Date.now() }];
-    setFriends(next); void Storage.saveFriends(next); setFriendInput('');
-    Alert.alert('添加成功', '好友已保存到本机。');
-  }, [friendInput, friends]);
-
   const saveNick = useCallback(() => {
     if (!profile) return;
     const next = { ...profile, nickname: nickInput.trim() || '音乐爱好者' };
     setProfile(next); void Storage.saveProfile(next);
     Alert.alert('已保存', '昵称已更新。');
   }, [profile, nickInput]);
-
-  const resetMusicCode = useCallback(() => {
-    if (!profile) return;
-    Alert.alert('重置音乐符', '重置后旧的音乐符将失效，确定继续？', [
-      { text: '取消', style: 'cancel' },
-      { text: '确定', onPress: () => {
-        const next = { ...profile, musicCode: makeMusicCode() };
-        setProfile(next); void Storage.saveProfile(next);
-      } }
-    ]);
-  }, [profile]);
 
   const renderSourcePills = (track: Track) => (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pillsRow}>
@@ -235,11 +221,9 @@ function App(): React.JSX.Element {
           <Text style={styles.brandSub}>多音源免费音乐聚合</Text>
         </View>
         <View style={styles.headerSpacer} />
-        {profile && (
-          <TouchableOpacity style={styles.codeChip} onPress={() => setTab('library')}>
-            <Text style={styles.codeChipText}>{profile.musicCode}</Text>
-          </TouchableOpacity>
-        )}
+        <TouchableOpacity style={styles.codeChip} onPress={() => setTab('library')}>
+          <Text style={styles.codeChipText}>{profile?.nickname ? '♪ ' + profile.nickname : '♪ 设置昵称'}</Text>
+        </TouchableOpacity>
       </View>
 
       {/* 搜索栏 */}
@@ -303,26 +287,10 @@ function App(): React.JSX.Element {
         <ScrollView style={styles.content}>
           <Text style={styles.sectionTitle}>我的资料</Text>
           <View style={styles.card}>
-            <Text style={styles.cardLabel}>昵称</Text>
+            <Text style={styles.cardLabel}>昵称（仅保存在本机）</Text>
             <TextInput style={styles.cardInput} value={nickInput} onChangeText={setNickInput} placeholder="你的昵称" placeholderTextColor={COLORS.sub} />
             <TouchableOpacity style={styles.smallBtn} onPress={saveNick}><Text style={styles.smallBtnText}>保存昵称</Text></TouchableOpacity>
-            <Text style={styles.cardLabel}>音乐符</Text>
-            <View style={styles.codeRow}>
-              <Text style={styles.codeText}>{profile?.musicCode}</Text>
-              <TouchableOpacity onPress={resetMusicCode}><Text style={styles.linkText}>重置</Text></TouchableOpacity>
-            </View>
-            <Text style={styles.hint}>别人可用此音乐符添加你为好友。数据仅保存在本机。</Text>
-          </View>
-
-          <Text style={styles.sectionTitle}>好友</Text>
-          <View style={styles.card}>
-            <View style={styles.friendRow}>
-              <TextInput style={styles.cardInput} value={friendInput} onChangeText={setFriendInput} placeholder="输入音乐符 kbmusic-XXXXXX" placeholderTextColor={COLORS.sub} autoCapitalize="none" />
-              <TouchableOpacity style={styles.smallBtn} onPress={addFriend}><Text style={styles.smallBtnText}>添加</Text></TouchableOpacity>
-            </View>
-            {friends.length === 0 ? <Text style={styles.hint}>暂无好友</Text> : friends.map(f => (
-              <View key={f.code} style={styles.friendItem}><Text style={styles.friendName}>{f.nickname}</Text><Text style={styles.friendCode}>{f.code}</Text></View>
-            ))}
+            <Text style={styles.hint}>无需账号，昵称与收藏只保存在你的设备上。</Text>
           </View>
 
           <Text style={styles.sectionTitle}>播放队列（{queueKeys.length}）</Text>
@@ -335,7 +303,7 @@ function App(): React.JSX.Element {
           <View style={styles.card}>
             <Text style={styles.aboutTitle}>靠北音乐 · KB Music</Text>
             <Text style={styles.hint}>创始人：靠北（靠北科技）。「靠北」仅为品牌/项目名称，没有实际意义，请勿用于其他骂人/贬损语境。</Text>
-            <Text style={styles.hint}>收藏、队列、昵称、好友全部保存在本机，无需账号或数据库。</Text>
+            <Text style={styles.hint}>收藏、队列与昵称全部保存在本机，无需账号或数据库。</Text>
           </View>
         </ScrollView>
       )}
@@ -364,14 +332,30 @@ function App(): React.JSX.Element {
         ))}
       </View>
 
-      {/* 全屏播放页 */}
+      {/* 全屏播放页 - 酷狗概念版风格 */}
       <Modal visible={playerOpen} animationType="slide" onRequestClose={() => setPlayerOpen(false)}>
         <View style={styles.playerScreen}>
-          <TouchableOpacity style={styles.playerClose} onPress={() => setPlayerOpen(false)}><Text style={styles.playerCloseText}>∨ 收起</Text></TouchableOpacity>
+          <Animated.View style={[styles.playerAura, { opacity: 0.5 }]} />
+          <View style={styles.playerHeadRow}>
+            <TouchableOpacity onPress={() => setPlayerOpen(false)}><Text style={styles.playerCloseText}>∨ 收起</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => setVinylMode(v => !v)}>
+              <Text style={styles.playerModeText}>{vinylMode ? '◉ 唱片' : '□ 简约'}</Text>
+            </TouchableOpacity>
+          </View>
           {currentTrack && (
             <>
-              <Text style={styles.playerTitle}>{currentTrack.title}</Text>
-              <Text style={styles.playerArtist}>{currentTrack.artist}</Text>
+              <Animated.View style={[styles.playerCoverWrap, { transform: [{ rotate: spinAngle }] }]}>
+                {currentTrack.cover ? (
+                  <Image source={{ uri: currentTrack.cover }} style={[styles.playerCover, vinylMode && styles.playerCoverRound]} />
+                ) : (
+                  <View style={[styles.playerCover, styles.playerCoverPh, vinylMode && styles.playerCoverRound]}><Text style={styles.playerCoverPhText}>♪</Text></View>
+                )}
+                {vinylMode && <View style={styles.vinylHole} />}
+              </Animated.View>
+              <View style={styles.playerMetaBox}>
+                <Text style={styles.playerTitle}>{currentTrack.title}</Text>
+                <Text style={styles.playerArtist}>{currentTrack.artist}</Text>
+              </View>
               <View style={styles.lyricBox}>
                 <ScrollView ref={ref => { if (ref && currentLyricIdx >= 0) ref.scrollTo({ y: Math.max(0, currentLyricIdx * 34 - 120), animated: true }); }}>
                   {lyrics.length ? lyrics.map((l, i) => (
@@ -389,9 +373,29 @@ function App(): React.JSX.Element {
                 </TouchableOpacity>
                 <Text style={styles.timeText}>{fmtTime(duration)}</Text>
               </View>
-              <TouchableOpacity style={styles.bigPlay} onPress={() => void togglePlayPause()}>
-                <Text style={styles.bigPlayText}>{isPlaying ? '❚❚' : '▶'}</Text>
-              </TouchableOpacity>
+              <View style={styles.playerControls}>
+                <TouchableOpacity style={styles.ctrlBtn} onPress={() => toggleFav(currentTrack.key)}>
+                  <Text style={[styles.ctrlSide, favorites.includes(currentTrack.key) && styles.actionIconOn]}>{favorites.includes(currentTrack.key) ? '♥' : '♡'}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.bigPlay} onPress={() => void togglePlayPause()}>
+                  <Text style={styles.bigPlayText}>{isPlaying ? '❚❚' : '▶'}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.ctrlBtn} onPress={() => setDetailTrack(currentTrack)}>
+                  <Text style={styles.ctrlSide}>ⓘ</Text>
+                </TouchableOpacity>
+              </View>
+              <View style={styles.playerActions}>
+                <TouchableOpacity style={styles.actionBtn} onPress={() => toggleFav(currentTrack.key)}>
+                  <Text style={[styles.actionIcon, favorites.includes(currentTrack.key) && styles.actionIconOn]}>{favorites.includes(currentTrack.key) ? '♥' : '♡'}</Text>
+                  <Text style={styles.actionLabel}>喜欢</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.actionBtn} onPress={() => setDetailTrack(currentTrack)}>
+                  <Text style={styles.actionIcon}>ⓘ</Text><Text style={styles.actionLabel}>音源</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.actionBtn} onPress={() => setPlayerOpen(false)}>
+                  <Text style={styles.actionIcon}>☰</Text><Text style={styles.actionLabel}>队列</Text>
+                </TouchableOpacity>
+              </View>
             </>
           )}
         </View>
@@ -518,7 +522,26 @@ const styles = StyleSheet.create({
   detailSource: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, gap: 8, borderBottomWidth: 1, borderBottomColor: COLORS.border },
   detailSourceName: { color: COLORS.text, fontSize: 13, flex: 1 },
   detailSourceMeta: { color: COLORS.sub, fontSize: 11 },
-  detailSourceAcc: { fontSize: 11, fontWeight: '700' }
+  detailSourceAcc: { fontSize: 11, fontWeight: '700' },
+  // 酷狗概念版风格播放页
+  playerAura: { position: 'absolute', top: -60, left: -40, right: -40, height: 320, borderRadius: 160, backgroundColor: COLORS.accent },
+  playerHeadRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12 },
+  playerModeText: { color: COLORS.sub, fontSize: 12 },
+  playerCoverWrap: { width: 260, height: 260, alignSelf: 'center', marginTop: 8, marginBottom: 18, justifyContent: 'center', alignItems: 'center', borderRadius: 130, borderWidth: 6, borderColor: '#12121e' },
+  playerCover: { width: 232, height: 232 },
+  playerCoverRound: { borderRadius: 116 },
+  playerCoverPh: { backgroundColor: COLORS.panel2, justifyContent: 'center', alignItems: 'center' },
+  playerCoverPhText: { color: COLORS.accent, fontSize: 80 },
+  vinylHole: { position: 'absolute', width: 26, height: 26, borderRadius: 13, backgroundColor: '#0a0a14', borderWidth: 3, borderColor: '#2a2a44' },
+  playerMetaBox: { alignItems: 'center', marginBottom: 14 },
+  playerControls: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 36, marginTop: 16 },
+  ctrlBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: COLORS.panel2, justifyContent: 'center', alignItems: 'center' },
+  ctrlSide: { color: COLORS.sub, fontSize: 18 },
+  playerActions: { flexDirection: 'row', justifyContent: 'space-around', marginTop: 20, paddingTop: 16, borderTopWidth: 1, borderTopColor: COLORS.border },
+  actionBtn: { alignItems: 'center', gap: 4 },
+  actionIcon: { color: COLORS.sub, fontSize: 22 },
+  actionIconOn: { color: '#fb7185' },
+  actionLabel: { color: COLORS.sub, fontSize: 11 }
 });
 
 export default App;

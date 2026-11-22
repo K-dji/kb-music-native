@@ -1,0 +1,69 @@
+name: Build KB Music Native APK
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Strict type check
+        run: npx tsc --noEmit
+
+      - name: Make gradlew executable
+        run: chmod +x android/gradlew
+
+      - name: Build Debug APK
+        run: cd android && ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Locate APK
+        id: apk
+        run: |
+          APK=$(find android/app/build/outputs/apk -name '*.apk' | head -1)
+          test -n "$APK" || (echo "APK not found" && exit 1)
+          cp "$APK" "KB-Music-native-v1.0.0.apk"
+          echo "Found: $APK"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KB-Music-Native-APK
+          path: KB-Music-native-v1.0.0.apk
+
+      - name: Publish to Release
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: KB-Music-native-v1.0.0.apk
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v1.0.0' }}
+          name: KB Music 原生版 v1.0.0
+          body: |
+            KB Music 原生 Android 版（React Native + TypeScript 严格模式，非网页套壳）
+            创始人：靠北（靠北科技）
+            多音源免费音乐聚合；收藏/队列/昵称/好友全部保存在本机，无需账号或数据库。
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

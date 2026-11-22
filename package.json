@@ -1,0 +1,29 @@
+{
+  "name": "kb-music-native",
+  "version": "1.0.0",
+  "private": true,
+  "description": "KB Music 原生版 - 多音源免费音乐聚合，TypeScript 严格类型",
+  "scripts": {
+    "android": "react-native run-android",
+    "start": "react-native start",
+    "typecheck": "tsc --noEmit",
+    "build:android": "cd android && ./gradlew assembleDebug --no-daemon"
+  },
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "^1.23.1",
+    "react": "18.2.0",
+    "react-native": "0.74.5",
+    "react-native-track-player": "^4.1.1"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.24.0",
+    "@babel/runtime": "^7.24.0",
+    "@react-native/babel-preset": "0.74.89",
+    "@react-native/metro-config": "^0.74.89",
+    "@react-native/typescript-config": "0.74.89",
+    "@types/react": "^18.2.79",
+    "babel-plugin-module-resolver": "^5.0.0",
+    "metro-react-native-babel-preset": "^0.76.9",
+    "typescript": "^5.5.4"
+  }
+}

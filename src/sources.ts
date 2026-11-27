@@ -107,7 +107,7 @@ export function sourceDuration(s: TrackSource): number {
 /** 按平台 + 时长做强判定：网易<=46s/QQ<52s 为试听，咪咕与酷狗按接口时长判为免费 */
 export function sourceAccess(s: TrackSource): Access {
   if (!s) return 'preview';
-  if (s.failed) return 'paid';
+  if (!s.playUrl || s.failed) return 'paid';
   if (s.full === false) return 'preview';
   const d = sourceDuration(s);
   const id = String(s.sourceId || '').toLowerCase();

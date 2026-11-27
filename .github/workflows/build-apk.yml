@@ -45,22 +45,22 @@ jobs:
         run: |
           APK=$(find android/app/build/outputs/apk -name '*.apk' | head -1)
           test -n "$APK" || (echo "APK not found" && exit 1)
-          cp "$APK" "KB-Music-native-v1.0.2.apk"
+          cp "$APK" "KB-Music-native-v1.0.4.apk"
           echo "Found: $APK"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: KB-Music-Native-APK
-          path: KB-Music-native-v1.0.2.apk
+          path: KB-Music-native-v1.0.4.apk
 
       - name: Publish to Release
         if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
-          files: KB-Music-native-v1.0.2.apk
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v1.0.2' }}
-          name: KB Music 原生版 v1.0.2
+          files: KB-Music-native-v1.0.4.apk
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v1.0.4' }}
+          name: KB Music 原生版 v1.0.4
           body: |
             KB Music 原生 Android 版（React Native + TypeScript 严格模式，非网页套壳）
             创始人：靠北（靠北科技）

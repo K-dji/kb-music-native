@@ -210,6 +210,12 @@ function App(): React.JSX.Element {
   };
 
   const currentLyricIdx = lyricIndexAt(lyrics, position);
+  const lyricScrollRef = useRef<ScrollView>(null);
+  useEffect(() => {
+    if (currentLyricIdx >= 0 && lyricScrollRef.current) {
+      lyricScrollRef.current.scrollTo({ y: Math.max(0, currentLyricIdx * 34 - 110), animated: true });
+    }
+  }, [currentLyricIdx]);
 
   return (
     <View style={styles.root}>
@@ -357,7 +363,7 @@ function App(): React.JSX.Element {
                 <Text style={styles.playerArtist}>{currentTrack.artist}</Text>
               </View>
               <View style={styles.lyricBox}>
-                <ScrollView ref={ref => { if (ref && currentLyricIdx >= 0) ref.scrollTo({ y: Math.max(0, currentLyricIdx * 34 - 120), animated: true }); }}>
+                <ScrollView ref={lyricScrollRef} contentContainerStyle={styles.lyricContent}>
                   {lyrics.length ? lyrics.map((l, i) => (
                     <Text key={i} style={[styles.lyricLine, i === currentLyricIdx && styles.lyricLineOn]}>{l.text}</Text>
                   )) : <Text style={styles.lyricEmpty}>暂无歌词</Text>}
@@ -506,6 +512,7 @@ const styles = StyleSheet.create({
   playerTitle: { color: COLORS.text, fontSize: 22, fontWeight: '800', textAlign: 'center' },
   playerArtist: { color: COLORS.sub, fontSize: 14, textAlign: 'center', marginTop: 6 },
   lyricBox: { flex: 1, marginVertical: 20 },
+  lyricContent: { paddingVertical: 110 },
   lyricLine: { color: COLORS.sub, fontSize: 15, textAlign: 'center', paddingVertical: 8 },
   lyricLineOn: { color: COLORS.accent, fontSize: 18, fontWeight: '700' },
   lyricEmpty: { color: COLORS.sub, textAlign: 'center', marginTop: 40 },

@@ -16,7 +16,8 @@ import {
   View,
   useWindowDimensions
 } from 'react-native';
-import { State, usePlaybackState, useProgress } from 'react-native-track-player';
+import TrackPlayer, { State, usePlaybackState, useProgress } from 'react-native-track-player';
+import Voice, { type SpeechResultsEvent, type SpeechErrorEvent } from '@react-native-voice/voice';
 import type { Access, AppConfig, Profile, Track, TrackSource } from './src/types';
 import { ACCESS_META, type LyricLine } from './src/types';
 import { DEFAULT_CONFIG, accessOf, searchAll, sourceAccess, sourceDuration } from './src/sources';
@@ -89,6 +90,10 @@ function App(): React.JSX.Element {
   const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
   const [playerOpen, setPlayerOpen] = useState(false);
   const [lyricFocus, setLyricFocus] = useState(false);
+  const [voiceAwake, setVoiceAwake] = useState(false);
+  const [voiceText, setVoiceText] = useState('');
+  const voiceAwakeRef = useRef(false);
+  const volumeBeforeWake = useRef(0.8);
   const [lyrics, setLyrics] = useState<LyricLine[]>([]);
   const [detailTrack, setDetailTrack] = useState<Track | null>(null);
   const [nickInput, setNickInput] = useState('');
@@ -320,6 +325,107 @@ function App(): React.JSX.Element {
       }
     });
   }, [openPrompt, doSearch]);
+
+  const wakeAssistant = useCallback(() => {
+    voiceAwakeRef.current = true;
+    setVoiceAwake(true);
+    setVoiceText('我在，请说…');
+    TrackPlayer.getVolume().then(v => {
+      volumeBeforeWake.current = v || 0.8;
+      void TrackPlayer.setVolume(Math.min(volumeBeforeWake.current, 0.22));
+    }).catch(() => undefined);
+  }, []);
+
+  const localVoiceIntent = useCallback((text: string): string => {
+    const s = String(text || '').trim();
+    if (/小声|音量低|轻声/.test(s)) return 'VOL_DOWN';
+    if (/大声|音量高|响一点/.test(s)) return 'VOL_UP';
+    if (/暂停|停一下|停止播放/.test(s)) return 'PAUSE';
+    if (/继续|播放/.test(s)) {
+      const m = s.match(/播放(.+?)(音乐|歌曲|歌)?$/);
+      const name = (m && m[1] || '').replace(/一些|好听的|首|^[,，。 ]+|[,，。 ]+$/g, '').trim();
+      if (name) return 'PLAY:' + name;
+      return 'RESUME';
+    }
+    return 'UNKNOWN';
+  }, []);
+
+  const runVoiceCommand = useCallback(async (text: string) => {
+    let intent = localVoiceIntent(text);
+    try {
+      const resp = await fetch('https://kaobei-music.pages.dev/api/glm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: '把语音命令归类，只输出一行：PLAY:歌名 / VOL_DOWN / VOL_UP / PAUSE / RESUME / UNKNOWN。命令：' + text })
+      });
+      const data = await resp.json() as { choices?: Array<{ message?: { content?: string } }> };
+      const raw = String((data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '').trim();
+      if (/^(PLAY:|VOL_DOWN|VOL_UP|PAUSE|RESUME|UNKNOWN)/.test(raw)) intent = raw.split('\n')[0].trim();
+    } catch { /* 使用本地兜底 */ }
+    if (intent === 'VOL_DOWN') {
+      const cur = await TrackPlayer.getVolume().catch(() => 0.5);
+      await TrackPlayer.setVolume(Math.max(0.05, cur - 0.15));
+      setVoiceText('已调小音量');
+      return;
+    }
+    if (intent === 'VOL_UP') {
+      const cur = await TrackPlayer.getVolume().catch(() => 0.3);
+      await TrackPlayer.setVolume(Math.min(1, cur + 0.15));
+      setVoiceText('已调大音量');
+      return;
+    }
+    if (intent === 'PAUSE') { await togglePlayPause(); setVoiceText('好的，已暂停'); return; }
+    if (intent === 'RESUME') {
+      await togglePlayPause();
+      await TrackPlayer.setVolume(volumeBeforeWake.current);
+      setVoiceText('好的，继续播放');
+      return;
+    }
+    if (intent.startsWith('PLAY:')) {
+      const name = intent.slice(5).trim().slice(0, 40) || '好听的音乐';
+      setVoiceText('这就为您播放「' + name + '」');
+      setQuery(name);
+      const tracks = await searchAll(name, cfg).catch(() => []);
+      if (tracks.length) {
+        await startPlay(tracks[0]);
+        await TrackPlayer.setVolume(volumeBeforeWake.current);
+        voiceAwakeRef.current = false;
+        setVoiceAwake(false);
+      }
+      return;
+    }
+    setVoiceText('我没听懂，可以说“播放晴天”');
+  }, [cfg, localVoiceIntent, startPlay]);
+
+  useEffect(() => {
+    const onResults = (e: SpeechResultsEvent) => {
+      const spoken = String((e.value && e.value[0]) || '').trim();
+      if (!spoken) return;
+      const low = spoken.toLowerCase();
+      if (!voiceAwakeRef.current && /hey music|hi music|嗨音乐|嘿音乐/.test(low)) {
+        wakeAssistant();
+        return;
+      }
+      if (voiceAwakeRef.current) void runVoiceCommand(spoken);
+    };
+    const onError = (_e: SpeechErrorEvent) => setVoiceText('没有听清，请再说一次');
+    Voice.onSpeechResults = onResults;
+    Voice.onSpeechError = onError;
+    return () => { Voice.destroy().catch(() => undefined); };
+  }, [runVoiceCommand, wakeAssistant]);
+
+  const toggleAssistant = useCallback(() => {
+    if (voiceAwakeRef.current) {
+      void Voice.stop().catch(() => undefined);
+      voiceAwakeRef.current = false;
+      setVoiceAwake(false);
+      setVoiceText('');
+      void TrackPlayer.setVolume(volumeBeforeWake.current);
+      return;
+    }
+    wakeAssistant();
+    void Voice.start('zh-CN').catch(() => setVoiceText('麦克风不可用，请检查权限'));
+  }, [wakeAssistant]);
 
   const renderSourcePills = (track: Track) => (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pillsRow}>
@@ -591,6 +697,12 @@ function App(): React.JSX.Element {
           </TouchableOpacity>
         </TouchableOpacity>
       )}
+
+      {/* GLM 语音助手：全局蓝色渐变小球 */}
+      <TouchableOpacity style={styles.aiBall} onPress={toggleAssistant} activeOpacity={0.85} accessibilityLabel="语音助手">
+        <View style={styles.aiBallCore}><Text style={styles.aiBallText}>{voiceAwake ? '•••' : '♪'}</Text></View>
+      </TouchableOpacity>
+      {voiceText ? <View style={styles.aiBubble}><Text style={styles.aiBubbleText}>{voiceText}</Text></View> : null}
 
       {/* 底部导航 */}
       <View style={styles.tabBar}>
@@ -878,7 +990,12 @@ const styles = StyleSheet.create({
   groupToggle: { paddingVertical: 10 },
   groupToggleText: { color: COLORS.text, fontSize: 14, fontWeight: '700' },
   playlistName: { color: COLORS.text, fontSize: 14, fontWeight: '700' },
-  shareUrlText: { color: COLORS.accent, fontSize: 12, lineHeight: 18, marginTop: 10, padding: 10, backgroundColor: COLORS.panel2, borderRadius: 8 }
+  shareUrlText: { color: COLORS.accent, fontSize: 12, lineHeight: 18, marginTop: 10, padding: 10, backgroundColor: COLORS.panel2, borderRadius: 8 },
+  aiBall: { position: 'absolute', right: 16, bottom: 92, width: 58, height: 58, borderRadius: 29, backgroundColor: '#2563eb', justifyContent: 'center', alignItems: 'center', shadowColor: '#60a5fa', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.6, shadowRadius: 12, elevation: 8, zIndex: 80 },
+  aiBallCore: { width: 46, height: 46, borderRadius: 23, backgroundColor: '#3b82f6', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#93c5fd' },
+  aiBallText: { color: '#fff', fontSize: 18, fontWeight: '700' },
+  aiBubble: { position: 'absolute', right: 82, bottom: 104, maxWidth: 240, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 16, backgroundColor: '#1e3a8a', zIndex: 81 },
+  aiBubbleText: { color: '#fff', fontSize: 12, lineHeight: 17 }
 });
 
 export default App;

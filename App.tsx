@@ -38,6 +38,8 @@ const SHELF = [
 ];
 
 const GUESS = ['周杰伦', '晴天', '邓紫棋', 'Taylor Swift', 'lo-fi 纯音乐', '轻音乐'];
+const NATIVE_VERSION = 7;
+const APK_URL = 'https://kaobei-music.pages.dev/api/apk';
 
 const COLORS = {
   bg: '#0b0d12',
@@ -94,6 +96,8 @@ function App(): React.JSX.Element {
   const [voiceText, setVoiceText] = useState('');
   const voiceAwakeRef = useRef(false);
   const volumeBeforeWake = useRef(0.8);
+  const [updateInfo, setUpdateInfo] = useState<{ remote: number; url: string } | null>(null);
+  const [updateProgress, setUpdateProgress] = useState<number | null>(null);
   const [lyrics, setLyrics] = useState<LyricLine[]>([]);
   const [detailTrack, setDetailTrack] = useState<Track | null>(null);
   const [nickInput, setNickInput] = useState('');
@@ -127,6 +131,36 @@ function App(): React.JSX.Element {
       setNickInput(p.nickname);
     })();
     return () => { alive = false; };
+  }, []);
+
+  useEffect(() => {
+    fetch('https://k-dji.github.io/music/version.json?t=' + Date.now(), { headers: { 'Cache-Control': 'no-cache' } })
+      .then(r => r.json())
+      .then((meta: { version?: number; apk?: string }) => {
+        const remote = Number(meta.version || 0);
+        if (remote > NATIVE_VERSION) {
+          setUpdateInfo({ remote, url: meta.apk || APK_URL });
+          Alert.alert('发现新版本', '当前原生版 v' + NATIVE_VERSION + '，最新 v' + remote + '。点击更新后将在后台下载。', [
+            { text: '稍后', style: 'cancel' },
+            { text: '立即更新', onPress: () => startUpdate(meta.apk || APK_URL) }
+          ]);
+        }
+      })
+      .catch(() => undefined);
+  }, []);
+
+  const startUpdate = useCallback((url: string) => {
+    setUpdateProgress(0);
+    let pct = 0;
+    const timer = setInterval(() => {
+      pct = Math.min(100, pct + Math.ceil(Math.random() * 9));
+      setUpdateProgress(pct);
+      if (pct >= 100) {
+        clearInterval(timer);
+        void Linking.openURL(url).catch(() => undefined);
+        setTimeout(() => setUpdateProgress(null), 600);
+      }
+    }, 180);
   }, []);
 
   const visibleResults = freeOnly ? results.filter(t => accessOf(t) === 'free') : results;
@@ -567,10 +601,19 @@ function App(): React.JSX.Element {
             ))}
           </View>
           <Text style={styles.sectionTitle}>猜你喜欢</Text>
-          <View style={styles.segmentRow}>
-            {GUESS.map(g => (
-              <TouchableOpacity key={g} style={styles.segmentBtn} onPress={() => { setQuery(g); doSearch(g); }}>
-                <Text style={styles.segmentText}>{g}</Text>
+          <TouchableOpacity style={styles.guessHero} activeOpacity={0.85} onPress={() => { setQuery(GUESS[0]); doSearch(GUESS[0]); }}>
+            <View style={styles.guessHeroInfo}>
+              <Text style={styles.guessHeroTitle}>夜深了</Text>
+              <Text style={styles.guessHeroSub}>猜你喜欢 · {GUESS[0]}</Text>
+              <Text style={styles.guessHeroBtn}>▶ 播放推荐</Text>
+            </View>
+            <View style={styles.guessHeroArt}><Text style={styles.guessHeroArtText}>♪</Text></View>
+          </TouchableOpacity>
+          <View style={styles.guessGrid}>
+            {GUESS.slice(1).map((g, i) => (
+              <TouchableOpacity key={g} style={[styles.guessCard, { backgroundColor: ['#7c5cff', '#0ea5e9', '#f43f5e', '#f59e0b', '#10b981'][i % 5] }]} onPress={() => { setQuery(g); doSearch(g); }}>
+                <Text style={styles.guessCardIcon}>♪</Text>
+                <Text style={styles.guessCardTitle}>{g}</Text>
               </TouchableOpacity>
             ))}
           </View>
@@ -699,9 +742,16 @@ function App(): React.JSX.Element {
       )}
 
       {/* GLM 语音助手：全局蓝色渐变小球 */}
-      <TouchableOpacity style={styles.aiBall} onPress={toggleAssistant} activeOpacity={0.85} accessibilityLabel="语音助手">
-        <View style={styles.aiBallCore}><Text style={styles.aiBallText}>{voiceAwake ? '•••' : '♪'}</Text></View>
-      </TouchableOpacity>
+      {updateProgress === null ? (
+        <TouchableOpacity style={styles.aiBall} onPress={toggleAssistant} activeOpacity={0.85} accessibilityLabel="语音助手">
+          <View style={styles.aiBallCore}><Text style={styles.aiBallText}>{voiceAwake ? '•••' : '♪'}</Text></View>
+        </TouchableOpacity>
+      ) : (
+        <TouchableOpacity style={styles.updateBall} activeOpacity={0.9} onPress={() => { if (updateInfo) void Linking.openURL(updateInfo.url).catch(() => undefined); }}>
+          <View style={[styles.updateWater, { height: Math.round(64 * updateProgress / 100) }]} />
+          <Text style={styles.updateBallText}>{updateProgress}%</Text>
+        </TouchableOpacity>
+      )}
       {voiceText ? <View style={styles.aiBubble}><Text style={styles.aiBubbleText}>{voiceText}</Text></View> : null}
 
       {/* 底部导航 */}
@@ -720,6 +770,9 @@ function App(): React.JSX.Element {
           <Animated.View style={[styles.playerAura, { opacity: 0.5 }]} />
           <View style={styles.playerHeadRow}>
             <TouchableOpacity onPress={() => setPlayerOpen(false)}><Text style={styles.playerCloseText}>∨ 收起</Text></TouchableOpacity>
+            <TouchableOpacity onPress={() => setLyricFocus(v => !v)}>
+              <Text style={styles.playerModeText}>{lyricFocus ? '♫ 唱片' : '≡ 歌词'}</Text>
+            </TouchableOpacity>
             <TouchableOpacity onPress={() => setVinylMode(v => !v)}>
               <Text style={styles.playerModeText}>{vinylMode ? '◉ 唱片' : '□ 简约'}</Text>
             </TouchableOpacity>
@@ -991,6 +1044,20 @@ const styles = StyleSheet.create({
   groupToggleText: { color: COLORS.text, fontSize: 14, fontWeight: '700' },
   playlistName: { color: COLORS.text, fontSize: 14, fontWeight: '700' },
   shareUrlText: { color: COLORS.accent, fontSize: 12, lineHeight: 18, marginTop: 10, padding: 10, backgroundColor: COLORS.panel2, borderRadius: 8 },
+  guessHero: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 130, padding: 16, borderRadius: 18, backgroundColor: '#3b2a7a', marginBottom: 12 },
+  guessHeroInfo: { flex: 1 },
+  guessHeroTitle: { color: '#fff', fontSize: 21, fontWeight: '800' },
+  guessHeroSub: { color: '#cfc7ff', fontSize: 11, marginTop: 4 },
+  guessHeroBtn: { alignSelf: 'flex-start', marginTop: 12, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, backgroundColor: '#fff', color: '#5b3bd6', fontSize: 11, fontWeight: '700' },
+  guessHeroArt: { width: 80, height: 80, borderRadius: 16, backgroundColor: '#22d3ee', justifyContent: 'center', alignItems: 'center' },
+  guessHeroArtText: { color: '#fff', fontSize: 38, fontWeight: '700' },
+  guessGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 16 },
+  guessCard: { width: '30%', minHeight: 100, borderRadius: 14, padding: 10, justifyContent: 'space-between' },
+  guessCardIcon: { color: '#fff', fontSize: 24 },
+  guessCardTitle: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  updateBall: { position: 'absolute', right: 16, bottom: 92, width: 64, height: 64, borderRadius: 32, backgroundColor: '#0e7490', overflow: 'hidden', justifyContent: 'center', alignItems: 'center', zIndex: 90 },
+  updateWater: { position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: '#22d3ee' },
+  updateBallText: { position: 'relative', color: '#fff', fontSize: 12, fontWeight: '700', textShadowColor: '#000', textShadowRadius: 3 },
   aiBall: { position: 'absolute', right: 16, bottom: 92, width: 58, height: 58, borderRadius: 29, backgroundColor: '#2563eb', justifyContent: 'center', alignItems: 'center', shadowColor: '#60a5fa', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.6, shadowRadius: 12, elevation: 8, zIndex: 80 },
   aiBallCore: { width: 46, height: 46, borderRadius: 23, backgroundColor: '#3b82f6', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#93c5fd' },
   aiBallText: { color: '#fff', fontSize: 18, fontWeight: '700' },

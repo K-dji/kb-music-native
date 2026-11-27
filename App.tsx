@@ -3,6 +3,8 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  Clipboard,
+  Linking,
   FlatList,
   Image,
   Modal,
@@ -21,6 +23,7 @@ import { DEFAULT_CONFIG, accessOf, searchAll, sourceAccess, sourceDuration } fro
 import { Storage } from './src/storage';
 import { fetchLrc, lyricIndexAt, parseLrc } from './src/lrc';
 import { playTrack as enginePlay, seekTo, setupPlayer, togglePlayPause } from './src/player';
+import { parseInput, sharePlaylistUrl, slimTrack, type Playlist, type SharedSnapshot } from './src/library';
 
 type Tab = 'discover' | 'search' | 'library';
 
@@ -69,6 +72,17 @@ function App(): React.JSX.Element {
   const [cfg, setCfg] = useState<AppConfig>(DEFAULT_CONFIG);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [favorites, setFavorites] = useState<string[]>([]);
+  const [favoriteTracks, setFavoriteTracks] = useState<Track[]>([]);
+  const [collected, setCollected] = useState<Track[]>([]);
+  const [recent, setRecent] = useState<Track[]>([]);
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [activePlaylistId, setActivePlaylistId] = useState<string | null>(null);
+  const [playlistExpanded, setPlaylistExpanded] = useState(false);
+  const [librarySection, setLibrarySection] = useState<'liked' | 'collected' | 'recent' | 'playlists'>('liked');
+  const [shared, setShared] = useState<SharedSnapshot | null>(null);
+  const [promptState, setPromptState] = useState<{ title: string; value: string; onConfirm: (value: string) => void } | null>(null);
+  const [promptValue, setPromptValue] = useState('');
+  const [shareText, setShareText] = useState<string | null>(null);
   const [queueKeys, setQueueKeys] = useState<string[]>([]);
   const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
   const [playerOpen, setPlayerOpen] = useState(false);
@@ -94,12 +108,14 @@ function App(): React.JSX.Element {
     let alive = true;
     (async () => {
       await setupPlayer().catch(() => undefined);
-      const [c, p, fav, q] = await Promise.all([
+      const [c, p, fav, favTracks, col, rec, pls, q] = await Promise.all([
         Storage.loadConfig(), Storage.loadProfile(),
-        Storage.loadFavorites(), Storage.loadQueue()
+        Storage.loadFavorites(), Storage.loadFavoriteTracks(),
+        Storage.loadCollected(), Storage.loadRecent(), Storage.loadPlaylists(), Storage.loadQueue()
       ]);
       if (!alive) return;
-      setCfg(c); setProfile(p); setFavorites(fav); setQueueKeys(q);
+      setCfg(c); setProfile(p); setFavorites(fav); setFavoriteTracks(favTracks);
+      setCollected(col); setRecent(rec); setPlaylists(pls); setQueueKeys(q);
       setNickInput(p.nickname);
     })();
     return () => { alive = false; };
@@ -125,10 +141,20 @@ function App(): React.JSX.Element {
     }
   }, [cfg]);
 
+  const pushRecent = useCallback((track: Track) => {
+    const slim = slimTrack(track);
+    setRecent(prev => {
+      const next = [slim, ...prev.filter(t => t.key !== slim.key)].slice(0, 500);
+      void Storage.saveRecent(next);
+      return next;
+    });
+  }, []);
+
   const startPlay = useCallback(async (track: Track) => {
     const ok = await enginePlay(track).catch(() => false);
     if (ok) {
       setCurrentTrack(track);
+      pushRecent(track);
       setPlayerOpen(true);
       const src = track.sources.find(s => !s.failed && sourceAccess(s) === 'free') || track.sources[0];
       if (src?.lrcUrl) {
@@ -140,12 +166,27 @@ function App(): React.JSX.Element {
     } else {
       Alert.alert('播放失败', '该歌曲的所有音源均不可用，请换一首或检查网络。');
     }
+  }, [pushRecent]);
+
+  const toggleFav = useCallback((track: Track) => {
+    setFavorites(prev => {
+      const next = prev.includes(track.key) ? prev.filter(k => k !== track.key) : [...prev, track.key];
+      void Storage.saveFavorites(next);
+      return next;
+    });
+    setFavoriteTracks(prev => {
+      const has = prev.some(t => t.key === track.key);
+      const next = has ? prev.filter(t => t.key !== track.key) : [slimTrack(track), ...prev];
+      void Storage.saveFavoriteTracks(next);
+      return next;
+    });
   }, []);
 
-  const toggleFav = useCallback((key: string) => {
-    setFavorites(prev => {
-      const next = prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key];
-      void Storage.saveFavorites(next);
+  const toggleCollect = useCallback((track: Track) => {
+    setCollected(prev => {
+      const has = prev.some(t => t.key === track.key);
+      const next = has ? prev.filter(t => t.key !== track.key) : [slimTrack(track), ...prev];
+      void Storage.saveCollected(next);
       return next;
     });
   }, []);
@@ -166,6 +207,116 @@ function App(): React.JSX.Element {
     setProfile(next); void Storage.saveProfile(next);
     Alert.alert('已保存', '昵称已更新。');
   }, [profile, nickInput]);
+
+  const openPrompt = useCallback((title: string, value: string, onConfirm: (value: string) => void) => {
+    setPromptValue(value);
+    setPromptState({ title, value, onConfirm });
+  }, []);
+
+  const submitSearch = useCallback((text: string) => {
+    const parsed = parseInput(text);
+    if (parsed && parsed.kind === 'playlist') {
+      setShared({ n: parsed.name, t: parsed.tracks, v: 1 });
+      setTab('library');
+      setLibrarySection('playlists');
+      setPlaylistExpanded(false);
+      return;
+    }
+    if (parsed && parsed.kind === 'song') { void doSearch(parsed.term); return; }
+    if (parsed && parsed.kind === 'external') {
+      void Linking.openURL(parsed.url).catch(() => undefined);
+      return;
+    }
+    void doSearch(text);
+  }, [doSearch]);
+
+  const createPlaylist = useCallback(() => {
+    openPrompt('给新歌单起个名字', '我的歌单 ' + (playlists.length + 1), name => {
+      const trimmed = name.trim().slice(0, 40);
+      if (!trimmed) return;
+      const next = [...playlists, { id: 'pl-' + Date.now().toString(), name: trimmed, tracks: [], createdAt: Date.now() }];
+      setPlaylists(next);
+      void Storage.savePlaylists(next);
+      setActivePlaylistId(next[next.length - 1].id);
+      setPlaylistExpanded(true);
+      Alert.alert('已创建', '歌单《' + trimmed + '》已保存在本机。');
+    });
+  }, [openPrompt, playlists]);
+
+  const renamePlaylist = useCallback((p: Playlist) => {
+    openPrompt('修改歌单名称', p.name, name => {
+      const trimmed = name.trim().slice(0, 40);
+      if (!trimmed) return;
+      const next = playlists.map(x => x.id === p.id ? { ...x, name: trimmed } : x);
+      setPlaylists(next);
+      void Storage.savePlaylists(next);
+    });
+  }, [openPrompt, playlists]);
+
+  const deletePlaylist = useCallback((p: Playlist) => {
+    Alert.alert('删除歌单', '确定删除《' + p.name + '》吗？', [
+      { text: '取消', style: 'cancel' },
+      { text: '删除', style: 'destructive', onPress: () => {
+        const next = playlists.filter(x => x.id !== p.id);
+        setPlaylists(next);
+        void Storage.savePlaylists(next);
+        if (activePlaylistId === p.id) setActivePlaylistId(null);
+      } }
+    ]);
+  }, [playlists, activePlaylistId]);
+
+  const addCurrentToPlaylist = useCallback((p: Playlist) => {
+    if (!currentTrack) { Alert.alert('请先播放一首歌曲'); return; }
+    const slim = slimTrack(currentTrack);
+    const next = playlists.map(x => x.id === p.id
+      ? { ...x, tracks: [slim, ...x.tracks.filter(t => t.key !== slim.key)] }
+      : x);
+    setPlaylists(next);
+    void Storage.savePlaylists(next);
+    Alert.alert('已加入', '《' + currentTrack.title + '》已加入《' + p.name + '》。');
+  }, [currentTrack, playlists]);
+
+  const removeFromPlaylist = useCallback((p: Playlist, track: Track) => {
+    const next = playlists.map(x => x.id === p.id ? { ...x, tracks: x.tracks.filter(t => t.key !== track.key) } : x);
+    setPlaylists(next);
+    void Storage.savePlaylists(next);
+  }, [playlists]);
+
+  const sharePlaylist = useCallback((p: Playlist) => {
+    setShareText(sharePlaylistUrl(p.name, p.tracks));
+  }, []);
+
+  const importShared = useCallback(() => {
+    if (!shared) return;
+    openPrompt('导入到你的歌单库，命名为', shared.n + '（副本）', name => {
+      const trimmed = name.trim().slice(0, 40);
+      if (!trimmed) return;
+      const next = [...playlists, {
+        id: 'pl-' + Date.now().toString(), name: trimmed,
+        tracks: shared.t.map(slimTrack), createdAt: Date.now()
+      }];
+      setPlaylists(next);
+      void Storage.savePlaylists(next);
+      setShared(null);
+      setActivePlaylistId(next[next.length - 1].id);
+      setPlaylistExpanded(true);
+      Alert.alert('已导入', '可以像自己的歌单一样修改。');
+    });
+  }, [shared, openPrompt, playlists]);
+
+  const importFromLink = useCallback(() => {
+    openPrompt('粘贴他人分享的歌单链接', '', text => {
+      const parsed = parseInput(text.trim());
+      if (parsed && parsed.kind === 'playlist') {
+        setShared({ n: parsed.name, t: parsed.tracks, v: 1 });
+        Alert.alert('已识别歌单', '《' + parsed.name + '》共 ' + parsed.tracks.length + ' 首。');
+      } else if (parsed && parsed.kind === 'song') {
+        void doSearch(parsed.term);
+      } else {
+        Alert.alert('链接无效', '请粘贴 KB Music 的 /p/ 或 /s/ 分享链接。');
+      }
+    });
+  }, [openPrompt, doSearch]);
 
   const renderSourcePills = (track: Track) => (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pillsRow}>
@@ -198,8 +349,11 @@ function App(): React.JSX.Element {
           {renderSourcePills(item)}
         </View>
         <View style={styles.trackActions}>
-          <TouchableOpacity onPress={() => toggleFav(item.key)} style={styles.iconBtn}>
-            <Text style={[styles.iconText, { color: isFav ? '#fb7185' : COLORS.sub }]}>{isFav ? '♥' : '♡'}</Text>
+          <TouchableOpacity onPress={() => toggleFav(item)} style={styles.iconBtn}>
+            <Text style={[styles.iconText, { color: isFav ? '#ff3b5c' : COLORS.sub }]}>{isFav ? '♥' : '♡'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => toggleCollect(item)} style={styles.iconBtn}>
+            <Text style={[styles.iconText, { color: collected.some(t => t.key === item.key) ? '#f59e0b' : COLORS.sub }]}>★</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => addToQueue(item)} style={styles.iconBtn}>
             <Text style={styles.iconText}>+</Text>
@@ -216,6 +370,35 @@ function App(): React.JSX.Element {
       lyricScrollRef.current.scrollTo({ y: Math.max(0, currentLyricIdx * 34 - 110), animated: true });
     }
   }, [currentLyricIdx]);
+
+  const renderLibraryList = (list: Track[], emptyText: string, onRemove?: (track: Track) => void) => {
+    if (!list.length) return <Text style={styles.hint}>{emptyText}</Text>;
+    return list.map(t => (
+      <TouchableOpacity key={t.key} style={styles.trackCard} onPress={() => void startPlay(t)} activeOpacity={0.75}>
+        <View style={[styles.cover, styles.coverPh]}><Text style={styles.coverPhText}>♪</Text></View>
+        <View style={styles.trackInfo}>
+          <Text style={styles.trackTitle} numberOfLines={1}>{t.title}</Text>
+          <Text style={styles.trackArtist} numberOfLines={1}>{t.artist}</Text>
+        </View>
+        <View style={styles.trackActions}>
+          <TouchableOpacity onPress={() => toggleCollect(t)} style={styles.iconBtn}>
+            <Text style={[styles.iconText, { color: collected.some(x => x.key === t.key) ? '#f59e0b' : COLORS.sub }]}>★</Text>
+          </TouchableOpacity>
+          {onRemove && (
+            <TouchableOpacity onPress={() => onRemove(t)} style={styles.iconBtn}>
+              <Text style={styles.iconText}>✕</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </TouchableOpacity>
+    ));
+  };
+
+  const libraryLists: Record<'liked' | 'collected' | 'recent', { tracks: Track[]; empty: string }> = {
+    liked: { tracks: favoriteTracks, empty: '在歌曲或播放器上点红色爱心，就会出现在这里。' },
+    collected: { tracks: collected, empty: '点歌曲旁的橙色星星即可收藏。' },
+    recent: { tracks: recent, empty: '最近播放会保存在本机，最多 500 首。' }
+  };
 
   return (
     <View style={styles.root}>
@@ -240,10 +423,10 @@ function App(): React.JSX.Element {
           placeholderTextColor={COLORS.sub}
           value={query}
           onChangeText={setQuery}
-          onSubmitEditing={() => doSearch(query)}
+          onSubmitEditing={() => submitSearch(query)}
           returnKeyType="search"
         />
-        <TouchableOpacity style={styles.searchBtn} onPress={() => doSearch(query)}>
+        <TouchableOpacity style={styles.searchBtn} onPress={() => submitSearch(query)}>
           {searching ? <ActivityIndicator color="#04121a" size="small" /> : <Text style={styles.searchBtnText}>搜索</Text>}
         </TouchableOpacity>
       </View>
@@ -291,12 +474,82 @@ function App(): React.JSX.Element {
 
       {tab === 'library' && (
         <ScrollView style={styles.content}>
+          {shared ? (
+            <>
+              <Text style={styles.sectionTitle}>♫ {shared.n}</Text>
+              <Text style={styles.hint}>他人分享的歌单快照 · {shared.t.length} 首 · 不会随对方修改而更新</Text>
+              <TouchableOpacity style={styles.smallBtn} onPress={importShared}>
+                <Text style={styles.smallBtnText}>导入到我的歌单库</Text>
+              </TouchableOpacity>
+              {renderLibraryList(shared.t, '这个歌单目前没有歌曲。')}
+            </>
+          ) : (
+            <>
+              <Text style={styles.sectionTitle}>我的音乐库</Text>
+              <View style={styles.segmentRow}>
+                {([['liked', '♥ 我喜欢'], ['collected', '★ 收藏'], ['recent', '◷ 最近'], ['playlists', '♫ 歌单']] as const).map(([id, label]) => (
+                  <TouchableOpacity key={id} style={[styles.segmentBtn, librarySection === id && styles.segmentBtnOn]} onPress={() => setLibrarySection(id)}>
+                    <Text style={[styles.segmentText, librarySection === id && styles.segmentTextOn]}>{label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {librarySection !== 'playlists' && renderLibraryList(
+                libraryLists[librarySection].tracks,
+                libraryLists[librarySection].empty,
+                librarySection === 'collected' ? (t => toggleCollect(t)) : undefined
+              )}
+
+              {librarySection === 'playlists' && (
+                <>
+                  <View style={styles.rowButtons}>
+                    <TouchableOpacity style={styles.smallBtn} onPress={createPlaylist}>
+                      <Text style={styles.smallBtnText}>＋ 创建歌单</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.smallBtnGhost} onPress={importFromLink}>
+                      <Text style={styles.smallBtnGhostText}>导入他人歌单</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <TouchableOpacity style={styles.groupToggle} onPress={() => setPlaylistExpanded(v => !v)}>
+                    <Text style={styles.groupToggleText}>{playlistExpanded ? '▾' : '▶'} 我的个人歌单（{playlists.length}）</Text>
+                  </TouchableOpacity>
+                  {playlistExpanded && playlists.map(p => (
+                    <View key={p.id} style={styles.card}>
+                      <TouchableOpacity onPress={() => setActivePlaylistId(activePlaylistId === p.id ? null : p.id)}>
+                        <Text style={styles.playlistName}>♫ {p.name} · {p.tracks.length} 首</Text>
+                      </TouchableOpacity>
+                      <View style={styles.rowButtons}>
+                        <TouchableOpacity style={styles.smallBtnGhost} onPress={() => sharePlaylist(p)}>
+                          <Text style={styles.smallBtnGhostText}>分享</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.smallBtnGhost} onPress={() => renamePlaylist(p)}>
+                          <Text style={styles.smallBtnGhostText}>改名</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.smallBtnGhost} onPress={() => deletePlaylist(p)}>
+                          <Text style={styles.smallBtnGhostText}>删除</Text>
+                        </TouchableOpacity>
+                      </View>
+                      {activePlaylistId === p.id && (
+                        <>
+                          <TouchableOpacity style={styles.smallBtnGhost} onPress={() => addCurrentToPlaylist(p)}>
+                            <Text style={styles.smallBtnGhostText}>＋ 添加当前歌曲</Text>
+                          </TouchableOpacity>
+                          {renderLibraryList(p.tracks, '这个歌单还没有歌曲。', (t => removeFromPlaylist(p, t)))}
+                        </>
+                      )}
+                    </View>
+                  ))}
+                </>
+              )}
+            </>
+          )}
+
           <Text style={styles.sectionTitle}>我的资料</Text>
           <View style={styles.card}>
             <Text style={styles.cardLabel}>昵称（仅保存在本机）</Text>
             <TextInput style={styles.cardInput} value={nickInput} onChangeText={setNickInput} placeholder="你的昵称" placeholderTextColor={COLORS.sub} />
             <TouchableOpacity style={styles.smallBtn} onPress={saveNick}><Text style={styles.smallBtnText}>保存昵称</Text></TouchableOpacity>
-            <Text style={styles.hint}>无需账号，昵称与收藏只保存在你的设备上。</Text>
+            <Text style={styles.hint}>无需账号，昵称、收藏、最近播放与歌单只保存在你的设备上。</Text>
           </View>
 
           <Text style={styles.sectionTitle}>播放队列（{queueKeys.length}）</Text>
@@ -380,8 +633,8 @@ function App(): React.JSX.Element {
                 <Text style={styles.timeText}>{fmtTime(duration)}</Text>
               </View>
               <View style={styles.playerControls}>
-                <TouchableOpacity style={styles.ctrlBtn} onPress={() => toggleFav(currentTrack.key)}>
-                  <Text style={[styles.ctrlSide, favorites.includes(currentTrack.key) && styles.actionIconOn]}>{favorites.includes(currentTrack.key) ? '♥' : '♡'}</Text>
+                <TouchableOpacity style={styles.ctrlBtn} onPress={() => toggleFav(currentTrack)}>
+                  <Text style={[styles.ctrlSide, favorites.includes(currentTrack.key) && styles.heartOn]}>{favorites.includes(currentTrack.key) ? '♥' : '♡'}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.bigPlay} onPress={() => void togglePlayPause()}>
                   <Text style={styles.bigPlayText}>{isPlaying ? '❚❚' : '▶'}</Text>
@@ -391,9 +644,13 @@ function App(): React.JSX.Element {
                 </TouchableOpacity>
               </View>
               <View style={styles.playerActions}>
-                <TouchableOpacity style={styles.actionBtn} onPress={() => toggleFav(currentTrack.key)}>
-                  <Text style={[styles.actionIcon, favorites.includes(currentTrack.key) && styles.actionIconOn]}>{favorites.includes(currentTrack.key) ? '♥' : '♡'}</Text>
+                <TouchableOpacity style={styles.actionBtn} onPress={() => toggleFav(currentTrack)}>
+                  <Text style={[styles.actionIcon, favorites.includes(currentTrack.key) && styles.heartOn]}>{favorites.includes(currentTrack.key) ? '♥' : '♡'}</Text>
                   <Text style={styles.actionLabel}>喜欢</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.actionBtn} onPress={() => toggleCollect(currentTrack)}>
+                  <Text style={[styles.actionIcon, collected.some(t => t.key === currentTrack.key) && styles.starOn]}>★</Text>
+                  <Text style={styles.actionLabel}>收藏</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.actionBtn} onPress={() => setDetailTrack(currentTrack)}>
                   <Text style={styles.actionIcon}>ⓘ</Text><Text style={styles.actionLabel}>音源</Text>
@@ -404,6 +661,52 @@ function App(): React.JSX.Element {
               </View>
             </>
           )}
+        </View>
+      </Modal>
+
+      {/* 歌单命名 / 链接输入 */}
+      <Modal visible={promptState !== null} animationType="fade" transparent onRequestClose={() => setPromptState(null)}>
+        <View style={styles.detailOverlay}>
+          <View style={styles.detailCard}>
+            <Text style={styles.detailTitle}>{promptState ? promptState.title : ''}</Text>
+            <TextInput style={styles.cardInput} value={promptValue} onChangeText={setPromptValue} placeholder="输入内容" placeholderTextColor={COLORS.sub} autoFocus />
+            <View style={styles.rowButtons}>
+              <TouchableOpacity style={styles.smallBtnGhost} onPress={() => setPromptState(null)}>
+                <Text style={styles.smallBtnGhostText}>取消</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.smallBtn} onPress={() => {
+                const state = promptState;
+                setPromptState(null);
+                if (state) state.onConfirm(promptValue);
+              }}>
+                <Text style={styles.smallBtnText}>确定</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 分享链接 */}
+      <Modal visible={shareText !== null} animationType="fade" transparent onRequestClose={() => setShareText(null)}>
+        <View style={styles.detailOverlay}>
+          <View style={styles.detailCard}>
+            <Text style={styles.detailTitle}>分享歌单</Text>
+            <Text style={styles.hint}>链接包含歌单快照，对方看到的名字和歌曲不会随你后续修改而更新。</Text>
+            <Text style={styles.shareUrlText} selectable>{shareText || ''}</Text>
+            <View style={styles.rowButtons}>
+              <TouchableOpacity style={styles.smallBtnGhost} onPress={() => setShareText(null)}>
+                <Text style={styles.smallBtnGhostText}>关闭</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.smallBtn} onPress={() => {
+                if (shareText) {
+                  Clipboard.setString(shareText);
+                  Alert.alert('已复制', '歌单链接已复制到剪贴板。');
+                }
+              }}>
+                <Text style={styles.smallBtnText}>复制链接</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
       </Modal>
 
@@ -548,7 +851,21 @@ const styles = StyleSheet.create({
   actionBtn: { alignItems: 'center', gap: 4 },
   actionIcon: { color: COLORS.sub, fontSize: 22 },
   actionIconOn: { color: '#fb7185' },
-  actionLabel: { color: COLORS.sub, fontSize: 11 }
+  heartOn: { color: '#ff3b5c' },
+  starOn: { color: '#f59e0b' },
+  actionLabel: { color: COLORS.sub, fontSize: 11 },
+  segmentRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 },
+  segmentBtn: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 14, borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.panel },
+  segmentBtnOn: { borderColor: COLORS.accent2, backgroundColor: '#241b4d' },
+  segmentText: { color: COLORS.sub, fontSize: 12 },
+  segmentTextOn: { color: COLORS.text, fontWeight: '700' },
+  rowButtons: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8, marginBottom: 4 },
+  smallBtnGhost: { backgroundColor: COLORS.panel2, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, alignSelf: 'flex-start' },
+  smallBtnGhostText: { color: COLORS.sub, fontSize: 12, fontWeight: '600' },
+  groupToggle: { paddingVertical: 10 },
+  groupToggleText: { color: COLORS.text, fontSize: 14, fontWeight: '700' },
+  playlistName: { color: COLORS.text, fontSize: 14, fontWeight: '700' },
+  shareUrlText: { color: COLORS.accent, fontSize: 12, lineHeight: 18, marginTop: 10, padding: 10, backgroundColor: COLORS.panel2, borderRadius: 8 }
 });
 
 export default App;

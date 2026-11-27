@@ -34,6 +34,11 @@ function numOr(value: unknown, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+function toYear(value: string): number {
+  const m = String(value || '').match(/(19|20)\d{2}/);
+  return m ? Number(m[0]) : 0;
+}
+
 /** 纠正无效/危险的自定义 API 地址 */
 export function sanitizeBase(id: string, value: string): string {
   let v = String(value || '').trim();
@@ -99,12 +104,16 @@ export function sourceDuration(s: TrackSource): number {
   return numOr(s.actualDuration, numOr(s.declaredDuration, 0));
 }
 
-/** 用时长识别免费/试听：≥45 秒视为完整免费 */
+/** 按平台 + 时长做强判定：网易<=46s/QQ<52s 为试听，咪咕与酷狗按接口时长判为免费 */
 export function sourceAccess(s: TrackSource): Access {
   if (!s) return 'preview';
   if (s.failed) return 'paid';
   if (s.full === false) return 'preview';
   const d = sourceDuration(s);
+  const id = String(s.sourceId || '').toLowerCase();
+  if (id.includes('netease') || id === '163' || id === 'wy') return d > 0 && d <= 46 ? 'preview' : 'free';
+  if (id.includes('qq')) return d > 0 && d < 52 ? 'preview' : 'free';
+  if (id.includes('migu') || id.includes('kugou') || id === 'kg') return 'free';
   if (d > 0 && d < 45) return 'preview';
   if (d >= 45) return 'free';
   if (s.paid) return 'paid';
@@ -113,9 +122,19 @@ export function sourceAccess(s: TrackSource): Access {
 
 const ACCESS_RANK: Record<Access, number> = { free: 0, preview: 1, paid: 2 };
 
+function platformRank(s: TrackSource): number {
+  const id = String(s.sourceId || '').toLowerCase();
+  if (id.includes('kugou') || id === 'kg') return 0;
+  if (id.includes('migu')) return 1;
+  if (id.includes('netease') || id === '163' || id === 'wy') return 2;
+  if (id.includes('qq')) return 3;
+  return 4;
+}
+
 export function sortSources(sources: TrackSource[]): TrackSource[] {
   return sources.slice().sort((a, b) =>
     (ACCESS_RANK[sourceAccess(a)] - ACCESS_RANK[sourceAccess(b)]) ||
+    (platformRank(a) - platformRank(b)) ||
     (sourceDuration(b) - sourceDuration(a)) ||
     (b.priority - a.priority)
   );
@@ -128,7 +147,7 @@ export function accessOf(track: Track): Access {
   return sources.length ? 'paid' : 'preview';
 }
 
-function makeTrack(meta: { title: string; artist: string; album?: string; cover: string; duration: number }, src: SourceDef, source: TrackSource): Track {
+function makeTrack(meta: { title: string; artist: string; album?: string; cover: string; duration: number; year?: number }, src: SourceDef, source: TrackSource): Track {
   const key = `${normalizeKey(meta.title)}|${normalizeKey(meta.artist)}`;
   return {
     key,
@@ -138,6 +157,7 @@ function makeTrack(meta: { title: string; artist: string; album?: string; cover:
     album: meta.album || '',
     cover: meta.cover,
     duration: meta.duration,
+    year: meta.year || 0,
     sources: [source]
   };
 }
@@ -163,7 +183,8 @@ function normalizeTrack(raw: Record<string, unknown>, src: SourceDef): Track | n
       const cover = String(raw.artworkUrl100 || '').replace('100x100bb', '600x600bb');
       return makeTrack({
         title: String(raw.trackName || '未知歌曲'), artist: String(raw.artistName || '未知歌手'),
-        album: String(raw.collectionName || ''), cover, duration: Math.round(Number(raw.trackTimeMillis || 0) / 1000)
+        album: String(raw.collectionName || ''), cover, duration: Math.round(Number(raw.trackTimeMillis || 0) / 1000),
+        year: toYear(String(raw.releaseDate || ''))
       }, src, {
         sourceId: src.id, platform: src.name, short: src.short, color: src.color,
         priority: src.priority, full: false, tag: src.tag, paid: false, quality: qualityOf(raw, src),
@@ -281,6 +302,7 @@ export function dedupeAndSort(tracks: Track[], query: string): Track[] {
       if (s.playUrl && !existing.sources.some(o => o.playUrl === s.playUrl)) existing.sources.push(s);
     }
     existing.duration = existing.duration || track.duration;
+    existing.year = existing.year || track.year || 0;
     existing.sources = sortSources(existing.sources).slice(0, MAX_SOURCES);
   }
   return Array.from(map.values()).sort((a, b) =>

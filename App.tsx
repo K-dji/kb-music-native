@@ -36,6 +36,8 @@ const SHELF = [
   { name: '治愈系轻音乐', sub: '钢琴 · 吉他 · 自然', q: '治愈 轻音乐', c1: '#10b981', c2: '#064e3b', icon: '✿' }
 ];
 
+const GUESS = ['周杰伦', '晴天', '邓紫棋', 'Taylor Swift', 'lo-fi 纯音乐', '轻音乐'];
+
 const COLORS = {
   bg: '#0b0d12',
   panel: '#141821',
@@ -86,6 +88,7 @@ function App(): React.JSX.Element {
   const [queueKeys, setQueueKeys] = useState<string[]>([]);
   const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
   const [playerOpen, setPlayerOpen] = useState(false);
+  const [lyricFocus, setLyricFocus] = useState(false);
   const [lyrics, setLyrics] = useState<LyricLine[]>([]);
   const [detailTrack, setDetailTrack] = useState<Track | null>(null);
   const [nickInput, setNickInput] = useState('');
@@ -344,7 +347,7 @@ function App(): React.JSX.Element {
         {item.cover ? <Image source={{ uri: item.cover }} style={styles.cover} /> : <View style={[styles.cover, styles.coverPh]}><Text style={styles.coverPhText}>♪</Text></View>}
         <View style={styles.trackInfo}>
           <Text style={styles.trackTitle} numberOfLines={1}>{item.title}</Text>
-          <Text style={styles.trackArtist} numberOfLines={1}>{item.artist}</Text>
+          <Text style={styles.trackArtist} numberOfLines={1}>{item.artist}{item.year ? ' · ' + item.year : ''}</Text>
           <AccessBadge access={acc} />
           {renderSourcePills(item)}
         </View>
@@ -454,6 +457,14 @@ function App(): React.JSX.Element {
                 </View>
                 <Text style={styles.shelfName} numberOfLines={1}>{p.name}</Text>
                 <Text style={styles.shelfSub} numberOfLines={1}>{p.sub}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <Text style={styles.sectionTitle}>猜你喜欢</Text>
+          <View style={styles.segmentRow}>
+            {GUESS.map(g => (
+              <TouchableOpacity key={g} style={styles.segmentBtn} onPress={() => { setQuery(g); doSearch(g); }}>
+                <Text style={styles.segmentText}>{g}</Text>
               </TouchableOpacity>
             ))}
           </View>
@@ -569,7 +580,7 @@ function App(): React.JSX.Element {
 
       {/* 迷你播放条 */}
       {currentTrack && (
-        <TouchableOpacity style={styles.miniPlayer} onPress={() => setPlayerOpen(true)} activeOpacity={0.9}>
+        <TouchableOpacity style={styles.miniPlayer} onPress={() => { setLyricFocus(false); setPlayerOpen(true); }} activeOpacity={0.9}>
           <Image source={{ uri: currentTrack.cover || (sourceAccess(currentTrack.sources[0]) ? '' : '') }} style={styles.miniCover} />
           <View style={styles.miniInfo}>
             <Text style={styles.miniTitle} numberOfLines={1}>{currentTrack.title}</Text>
@@ -603,6 +614,7 @@ function App(): React.JSX.Element {
           </View>
           {currentTrack && (
             <>
+              {!lyricFocus && <TouchableOpacity activeOpacity={0.9} onPress={() => setLyricFocus(true)}>
               <Animated.View style={[styles.playerCoverWrap, { transform: [{ rotate: spinAngle }] }]}>
                 {currentTrack.cover ? (
                   <Image source={{ uri: currentTrack.cover }} style={[styles.playerCover, vinylMode && styles.playerCoverRound]} />
@@ -611,10 +623,11 @@ function App(): React.JSX.Element {
                 )}
                 {vinylMode && <View style={styles.vinylHole} />}
               </Animated.View>
-              <View style={styles.playerMetaBox}>
+              </TouchableOpacity>}
+              <TouchableOpacity style={styles.playerMetaBox} activeOpacity={0.9} onPress={() => setLyricFocus(v => !v)}>
                 <Text style={styles.playerTitle}>{currentTrack.title}</Text>
-                <Text style={styles.playerArtist}>{currentTrack.artist}</Text>
-              </View>
+                <Text style={styles.playerArtist}>{currentTrack.artist}{currentTrack.year ? ' · ' + currentTrack.year : ''}</Text>
+              </TouchableOpacity>
               <View style={styles.lyricBox}>
                 <ScrollView ref={lyricScrollRef} contentContainerStyle={styles.lyricContent}>
                   {lyrics.length ? lyrics.map((l, i) => (

@@ -60,6 +60,7 @@ export interface Track {
   album: string;
   cover: string;
   duration: number;
+  year?: number;
   sources: TrackSource[];
 }
 

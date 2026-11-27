@@ -1,13 +1,18 @@
 // 本地存储封装 —— 纯本地，无账号无数据库
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { AppConfig, Friend, Profile } from './types';
+import type { AppConfig, Friend, Profile, Track } from './types';
+import type { Playlist } from './library';
 import { DEFAULT_CONFIG } from './sources';
 
 const KEYS = {
   profile: 'kb-music-profile-v1',
   friends: 'kb-music-friends-v1',
   favorites: 'kb-music-favorites-v1',
+  favoriteTracks: 'kb-music-favorite-tracks-v1',
+  collected: 'kb-music-collected-v1',
+  recent: 'kb-music-recent-v1',
+  playlists: 'kb-music-playlists-v1',
   queue: 'kb-music-queue-v1',
   config: 'kb-music-config-v1'
 } as const;
@@ -45,6 +50,18 @@ export const Storage = {
 
   loadFavorites: (): Promise<string[]> => load<string[]>(KEYS.favorites, []),
   saveFavorites: (f: string[]): Promise<void> => save(KEYS.favorites, f),
+
+  loadFavoriteTracks: (): Promise<Track[]> => load<Track[]>(KEYS.favoriteTracks, []),
+  saveFavoriteTracks: (t: Track[]): Promise<void> => save(KEYS.favoriteTracks, t.slice(0, 500)),
+
+  loadCollected: (): Promise<Track[]> => load<Track[]>(KEYS.collected, []),
+  saveCollected: (t: Track[]): Promise<void> => save(KEYS.collected, t.slice(0, 500)),
+
+  loadRecent: (): Promise<Track[]> => load<Track[]>(KEYS.recent, []),
+  saveRecent: (t: Track[]): Promise<void> => save(KEYS.recent, t.slice(0, 500)),
+
+  loadPlaylists: (): Promise<Playlist[]> => load<Playlist[]>(KEYS.playlists, []),
+  savePlaylists: (p: Playlist[]): Promise<void> => save(KEYS.playlists, p.slice(0, 200)),
 
   loadQueue: (): Promise<string[]> => load<string[]>(KEYS.queue, []),
   saveQueue: (q: string[]): Promise<void> => save(KEYS.queue, q),

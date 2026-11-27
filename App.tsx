@@ -356,7 +356,7 @@ function App(): React.JSX.Element {
       const resp = await fetch('https://kaobei-music.pages.dev/api/glm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: '把语音命令归类，只输出一行：PLAY:歌名 / VOL_DOWN / VOL_UP / PAUSE / RESUME / UNKNOWN。命令：' + text })
+        body: JSON.stringify({ mode: 'intent', prompt: text })
       });
       const data = await resp.json() as { choices?: Array<{ message?: { content?: string } }> };
       const raw = String((data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '').trim();

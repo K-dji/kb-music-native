@@ -8,8 +8,12 @@ import {
   FlatList,
   Image,
   Modal,
+  PanResponder,
+  PermissionsAndroid,
+  Platform,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -20,7 +24,7 @@ import TrackPlayer, { State, usePlaybackState, useProgress } from 'react-native-
 import Voice, { type SpeechResultsEvent, type SpeechErrorEvent } from '@react-native-voice/voice';
 import type { Access, AppConfig, Profile, Track, TrackSource } from './src/types';
 import { ACCESS_META, type LyricLine } from './src/types';
-import { DEFAULT_CONFIG, accessOf, searchAll, sourceAccess, sourceDuration } from './src/sources';
+import { DEFAULT_CONFIG, SOURCE_DEFS, accessOf, searchAll, sourceAccess, sourceDuration } from './src/sources';
 import { Storage } from './src/storage';
 import { fetchLrc, lyricIndexAt, parseLrc } from './src/lrc';
 import { playTrack as enginePlay, seekTo, setupPlayer, togglePlayPause } from './src/player';
@@ -38,7 +42,7 @@ const SHELF = [
 ];
 
 const GUESS = ['周杰伦', '晴天', '邓紫棋', 'Taylor Swift', 'lo-fi 纯音乐', '轻音乐'];
-const NATIVE_VERSION = 7;
+const NATIVE_VERSION = 10;
 const APK_URL = 'https://kaobei-music.pages.dev/api/apk';
 
 const COLORS = {
@@ -72,6 +76,10 @@ function App(): React.JSX.Element {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Track[]>([]);
   const [freeOnly, setFreeOnly] = useState(false);
+  const [accessFilter, setAccessFilter] = useState<'all' | Access>('all');
+  const [sourceFilter, setSourceFilter] = useState('all');
+  const [sortBy, setSortBy] = useState<'default' | 'time' | 'title'>('default');
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [searching, setSearching] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [cfg, setCfg] = useState<AppConfig>(DEFAULT_CONFIG);
@@ -96,6 +104,15 @@ function App(): React.JSX.Element {
   const [voiceText, setVoiceText] = useState('');
   const voiceAwakeRef = useRef(false);
   const volumeBeforeWake = useRef(0.8);
+  const ballPos = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
+  const ballPan = useRef(PanResponder.create({
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderMove: Animated.event(
+      [null, { dx: ballPos.x, dy: ballPos.y }],
+      { useNativeDriver: false }
+    ),
+    onPanResponderRelease: () => undefined
+  })).current;
   const [updateInfo, setUpdateInfo] = useState<{ remote: number; url: string } | null>(null);
   const [updateProgress, setUpdateProgress] = useState<number | null>(null);
   const [lyrics, setLyrics] = useState<LyricLine[]>([]);
@@ -103,6 +120,7 @@ function App(): React.JSX.Element {
   const [nickInput, setNickInput] = useState('');
   const searchSeq = useRef(0);
   const spin = useRef(new Animated.Value(0)).current;
+  const mineAnim = useRef(new Animated.Value(0)).current;
   const [vinylMode, setVinylMode] = useState(true);
   const playState = usePlaybackState();
   const { position, duration } = useProgress(500);
@@ -163,7 +181,17 @@ function App(): React.JSX.Element {
     }, 180);
   }, []);
 
-  const visibleResults = freeOnly ? results.filter(t => accessOf(t) === 'free') : results;
+  const visibleResults = (() => {
+    let list = results.filter(t => {
+      if (freeOnly && accessOf(t) !== 'free') return false;
+      if (accessFilter !== 'all' && accessOf(t) !== accessFilter) return false;
+      if (sourceFilter !== 'all' && !(t.sources || []).some(s => s.sourceId === sourceFilter)) return false;
+      return true;
+    });
+    if (sortBy === 'time') list = list.slice().sort((a, b) => a.duration - b.duration);
+    if (sortBy === 'title') list = list.slice().sort((a, b) => a.title.localeCompare(b.title, 'zh-Hans-CN'));
+    return list;
+  })();
   const freeCount = results.filter(t => accessOf(t) === 'free').length;
 
   const doSearch = useCallback(async (q: string) => {
@@ -209,6 +237,14 @@ function App(): React.JSX.Element {
       Alert.alert('播放失败', '该歌曲的所有音源均不可用，请换一首或检查网络。');
     }
   }, [pushRecent]);
+
+  const playRelative = useCallback((delta: number) => {
+    const list = visibleResults.length ? visibleResults : results;
+    if (!list.length) return;
+    const idx = list.findIndex(t => t.key === currentTrack?.key);
+    const next = list[(idx + delta + list.length) % list.length];
+    if (next) void startPlay(next);
+  }, [visibleResults, results, currentTrack, startPlay]);
 
   const toggleFav = useCallback((track: Track) => {
     setFavorites(prev => {
@@ -458,7 +494,13 @@ function App(): React.JSX.Element {
       return;
     }
     wakeAssistant();
-    void Voice.start('zh-CN').catch(() => setVoiceText('麦克风不可用，请检查权限'));
+    const start = () => { void Voice.start('zh-CN').catch(() => setVoiceText('麦克风不可用，请检查权限')); };
+    if (Platform.OS === 'android') {
+      void PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO).then(granted => {
+        if (granted === PermissionsAndroid.RESULTS.GRANTED) start();
+        else setVoiceText('需要麦克风权限才能唤醒');
+      });
+    } else start();
   }, [wakeAssistant]);
 
   const renderSourcePills = (track: Track) => (
@@ -553,6 +595,9 @@ function App(): React.JSX.Element {
           <Text style={styles.brandSub}>多音源免费音乐聚合</Text>
         </View>
         <View style={styles.headerSpacer} />
+        <TouchableOpacity style={styles.settingGear} onPress={() => setSettingsOpen(true)}>
+          <Text style={styles.settingGearText}>⚙</Text>
+        </TouchableOpacity>
         <TouchableOpacity style={styles.codeChip} onPress={() => setTab('library')}>
           <Text style={styles.codeChipText}>{profile?.nickname ? '♪ ' + profile.nickname : '♪ 设置昵称'}</Text>
         </TouchableOpacity>
@@ -574,14 +619,35 @@ function App(): React.JSX.Element {
         </TouchableOpacity>
       </View>
 
-      {/* 免费筛选 */}
+      {/* 完整筛选：访问状态 / 音源 / 排序 */}
       {tab === 'search' && (
-        <View style={styles.filterRow}>
-          <TouchableOpacity style={[styles.filterBtn, freeOnly && styles.filterBtnOn]} onPress={() => setFreeOnly(v => !v)}>
-            <Text style={[styles.filterBtnText, freeOnly && styles.filterBtnTextOn]}>{freeOnly ? '✓ ' : ''}仅看免费完整</Text>
-          </TouchableOpacity>
-          <Text style={styles.filterStat}>免费 {freeCount} 首 / 共 {results.length} 首</Text>
-          {progress && <Text style={styles.filterStat}>{progress.done}/{progress.total} 源</Text>}
+        <View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow}>
+            {([['all', '全部'], ['free', '免费'], ['preview', '试听'], ['paid', '付费']] as const).map(([v, label]) => (
+              <TouchableOpacity key={v} style={[styles.filterBtn, accessFilter === v && styles.filterBtnOn]} onPress={() => setAccessFilter(v)}>
+                <Text style={[styles.filterBtnText, accessFilter === v && styles.filterBtnTextOn]}>{label}</Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity style={[styles.filterBtn, sourceFilter === 'all' && styles.filterBtnOn]} onPress={() => setSourceFilter('all')}>
+              <Text style={[styles.filterBtnText, sourceFilter === 'all' && styles.filterBtnTextOn]}>全部音源</Text>
+            </TouchableOpacity>
+            {SOURCE_DEFS.map(s => (
+              <TouchableOpacity key={s.id} style={[styles.filterBtn, sourceFilter === s.id && styles.filterBtnOn]} onPress={() => setSourceFilter(s.id)}>
+                <Text style={[styles.filterBtnText, sourceFilter === s.id && styles.filterBtnTextOn]}>{s.short}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow}>
+            {([['default', '默认排序'], ['time', '时长优先'], ['title', '标题排序']] as const).map(([v, label]) => (
+              <TouchableOpacity key={v} style={[styles.filterBtn, sortBy === v && styles.filterBtnOn]} onPress={() => setSortBy(v)}>
+                <Text style={[styles.filterBtnText, sortBy === v && styles.filterBtnTextOn]}>{label}</Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity style={styles.filterBtn} onPress={() => { setAccessFilter('all'); setSourceFilter('all'); setSortBy('default'); setFreeOnly(false); }}>
+              <Text style={styles.filterBtnText}>清除筛选</Text>
+            </TouchableOpacity>
+            <Text style={styles.filterStat}>免费 {freeCount} / 共 {results.length} · {progress ? progress.done + '/' + progress.total + ' 源' : ''}</Text>
+          </ScrollView>
         </View>
       )}
 
@@ -741,24 +807,72 @@ function App(): React.JSX.Element {
         </TouchableOpacity>
       )}
 
+      {/* 设置 / 音源设置 */}
+      <Modal visible={settingsOpen} transparent animationType="slide" onRequestClose={() => setSettingsOpen(false)}>
+        <View style={styles.modalMask}>
+          <View style={[styles.modalCard, { maxHeight: '82%' }]}>
+            <Text style={styles.modalTitle}>设置 · 音源</Text>
+            <ScrollView>
+              {SOURCE_DEFS.map(s => {
+                const conf = cfg.sources[s.id] || { enabled: false };
+                return (
+                  <View key={s.id} style={styles.settingRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.settingName}>{s.name}</Text>
+                      <Text style={styles.settingDesc}>{s.desc}</Text>
+                      {s.type === 'meting' && (
+                        <TextInput
+                          style={styles.settingInput}
+                          value={conf.base || s.defaultBase || ''}
+                          onChangeText={v => setCfg(prev => ({ ...prev, sources: { ...prev.sources, [s.id]: { ...conf, base: v } } }))}
+                          placeholder="Meting API 地址"
+                        />
+                      )}
+                    </View>
+                    <Switch
+                      value={!!conf.enabled}
+                      onValueChange={v => setCfg(prev => ({ ...prev, sources: { ...prev.sources, [s.id]: { ...conf, enabled: v } } }))}
+                    />
+                  </View>
+                );
+              })}
+            </ScrollView>
+            <TouchableOpacity style={styles.settingSave} onPress={() => { void Storage.saveConfig(cfg); setSettingsOpen(false); }}>
+              <Text style={styles.settingSaveText}>保存并返回</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       {/* GLM 语音助手：全局蓝色渐变小球 */}
-      {updateProgress === null ? (
-        <TouchableOpacity style={styles.aiBall} onPress={toggleAssistant} activeOpacity={0.85} accessibilityLabel="语音助手">
-          <View style={styles.aiBallCore}><Text style={styles.aiBallText}>{voiceAwake ? '•••' : '♪'}</Text></View>
-        </TouchableOpacity>
-      ) : (
-        <TouchableOpacity style={styles.updateBall} activeOpacity={0.9} onPress={() => { if (updateInfo) void Linking.openURL(updateInfo.url).catch(() => undefined); }}>
-          <View style={[styles.updateWater, { height: Math.round(64 * updateProgress / 100) }]} />
-          <Text style={styles.updateBallText}>{updateProgress}%</Text>
-        </TouchableOpacity>
-      )}
+      <Animated.View style={[styles.ballAnchor, { transform: ballPos.getTranslateTransform() }]} {...ballPan.panHandlers}>
+        {updateProgress === null ? (
+          <TouchableOpacity style={styles.aiBall} onPress={toggleAssistant} activeOpacity={0.85} accessibilityLabel="语音助手">
+            <View style={styles.aiBallCore}><Text style={styles.aiBallText}>{voiceAwake ? '•••' : '♪'}</Text></View>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity style={styles.updateBall} activeOpacity={0.9} onPress={() => { if (updateInfo) void Linking.openURL(updateInfo.url).catch(() => undefined); }}>
+            <View style={[styles.updateWater, { height: Math.round(64 * updateProgress / 100) }]} />
+            <Text style={styles.updateBallText}>{updateProgress}%</Text>
+          </TouchableOpacity>
+        )}
+      </Animated.View>
       {voiceText ? <View style={styles.aiBubble}><Text style={styles.aiBubbleText}>{voiceText}</Text></View> : null}
 
       {/* 底部导航 */}
       <View style={styles.tabBar}>
         {([['discover', '发现', '◈'], ['search', '搜索', '⌕'], ['library', '我的', '☺']] as const).map(([id, label, icon]) => (
-          <TouchableOpacity key={id} style={styles.tabItem} onPress={() => setTab(id)}>
-            <Text style={[styles.tabIcon, tab === id && styles.tabIconOn]}>{icon}</Text>
+          <TouchableOpacity key={id} style={styles.tabItem} onPress={() => {
+            setTab(id);
+            if (id === 'library') {
+              setLibrarySection('liked');
+              mineAnim.setValue(0);
+              Animated.spring(mineAnim, { toValue: 1, friction: 3, tension: 180, useNativeDriver: true }).start(() => mineAnim.setValue(0));
+            }
+          }}>
+            <Animated.Text style={[styles.tabIcon, tab === id && styles.tabIconOn, id === 'library' && styles.mineIcon, {
+              transform: id === 'library' ? [{ scale: mineAnim.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 1.35, 1] }) }, { rotate: mineAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] }) }] : []
+            }]}>{icon}</Animated.Text>
             <Text style={[styles.tabLabel, tab === id && styles.tabLabelOn]}>{label}</Text>
           </TouchableOpacity>
         ))}
@@ -767,7 +881,8 @@ function App(): React.JSX.Element {
       {/* 全屏播放页 - 酷狗概念版风格 */}
       <Modal visible={playerOpen} animationType="slide" onRequestClose={() => setPlayerOpen(false)}>
         <View style={styles.playerScreen}>
-          <Animated.View style={[styles.playerAura, { opacity: 0.5 }]} />
+          <View style={styles.playerTopBg} />
+          <Animated.View style={[styles.playerAura, { opacity: 0.35 }]} />
           <View style={styles.playerHeadRow}>
             <TouchableOpacity onPress={() => setPlayerOpen(false)}><Text style={styles.playerCloseText}>∨ 收起</Text></TouchableOpacity>
             <TouchableOpacity onPress={() => setLyricFocus(v => !v)}>
@@ -811,14 +926,14 @@ function App(): React.JSX.Element {
                 <Text style={styles.timeText}>{fmtTime(duration)}</Text>
               </View>
               <View style={styles.playerControls}>
-                <TouchableOpacity style={styles.ctrlBtn} onPress={() => toggleFav(currentTrack)}>
-                  <Text style={[styles.ctrlSide, favorites.includes(currentTrack.key) && styles.heartOn]}>{favorites.includes(currentTrack.key) ? '♥' : '♡'}</Text>
+                <TouchableOpacity style={styles.ctrlBtn} onPress={() => playRelative(-1)}>
+                  <Text style={styles.ctrlSide}>◀◀</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.bigPlay} onPress={() => void togglePlayPause()}>
+                <TouchableOpacity style={styles.bigPlay} activeOpacity={0.8} onPress={() => void togglePlayPause()}>
                   <Text style={styles.bigPlayText}>{isPlaying ? '❚❚' : '▶'}</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.ctrlBtn} onPress={() => setDetailTrack(currentTrack)}>
-                  <Text style={styles.ctrlSide}>ⓘ</Text>
+                <TouchableOpacity style={styles.ctrlBtn} onPress={() => playRelative(1)}>
+                  <Text style={styles.ctrlSide}>▶▶</Text>
                 </TouchableOpacity>
               </View>
               <View style={styles.playerActions}>
@@ -926,6 +1041,17 @@ const styles = StyleSheet.create({
   searchInput: { flex: 1, backgroundColor: COLORS.panel, borderRadius: 12, paddingHorizontal: 14, color: COLORS.text, borderWidth: 1, borderColor: COLORS.border, fontSize: 14 },
   searchBtn: { backgroundColor: COLORS.accent, borderRadius: 12, paddingHorizontal: 18, justifyContent: 'center' },
   searchBtnText: { color: '#04121a', fontWeight: '700', fontSize: 14 },
+  modalMask: { flex: 1, backgroundColor: 'rgba(0,0,0,.55)', justifyContent: 'flex-end' },
+  modalCard: { margin: 12, padding: 16, borderRadius: 20, backgroundColor: COLORS.panel },
+  modalTitle: { color: COLORS.text, fontSize: 16, fontWeight: '800', marginBottom: 10 },
+  settingGear: { width: 34, height: 34, borderRadius: 17, backgroundColor: COLORS.panel2, justifyContent: 'center', alignItems: 'center', marginRight: 8 },
+  settingGearText: { color: COLORS.accent, fontSize: 17 },
+  settingRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  settingName: { color: COLORS.text, fontSize: 13, fontWeight: '700' },
+  settingDesc: { color: COLORS.sub, fontSize: 10, marginTop: 2 },
+  settingInput: { marginTop: 6, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, backgroundColor: COLORS.panel2, color: COLORS.text, fontSize: 10 },
+  settingSave: { marginTop: 12, paddingVertical: 10, borderRadius: 12, backgroundColor: COLORS.accent, alignItems: 'center' },
+  settingSaveText: { color: '#04121a', fontWeight: '800', fontSize: 13 },
   filterRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, marginBottom: 8, gap: 10 },
   filterBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, borderWidth: 1, borderColor: COLORS.border },
   filterBtnOn: { backgroundColor: '#0d3b34', borderColor: '#22c55e' },
@@ -981,13 +1107,15 @@ const styles = StyleSheet.create({
   miniArtist: { color: COLORS.sub, fontSize: 11 },
   miniPlay: { padding: 8 },
   miniPlayText: { color: COLORS.accent, fontSize: 18 },
+  mineIcon: { color: '#ff6b9a', fontSize: 24, textShadowColor: '#ff6b9a', textShadowRadius: 8 },
   tabBar: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: COLORS.border, paddingVertical: 8 },
   tabItem: { flex: 1, alignItems: 'center' },
   tabIcon: { fontSize: 20, color: COLORS.sub },
   tabIconOn: { color: COLORS.accent },
   tabLabel: { color: COLORS.sub, fontSize: 11, marginTop: 2 },
   tabLabelOn: { color: COLORS.accent },
-  playerScreen: { flex: 1, backgroundColor: COLORS.bg, paddingHorizontal: 20, paddingTop: 50 },
+  playerScreen: { flex: 1, backgroundColor: '#0b1220', paddingHorizontal: 20, paddingTop: 50 },
+  playerTopBg: { position: 'absolute', left: 0, right: 0, top: 0, height: 300, backgroundColor: '#0e6f78' },
   playerClose: { alignSelf: 'flex-start', marginBottom: 30 },
   playerCloseText: { color: COLORS.sub, fontSize: 15 },
   playerTitle: { color: COLORS.text, fontSize: 22, fontWeight: '800', textAlign: 'center' },
@@ -1055,10 +1183,11 @@ const styles = StyleSheet.create({
   guessCard: { width: '30%', minHeight: 100, borderRadius: 14, padding: 10, justifyContent: 'space-between' },
   guessCardIcon: { color: '#fff', fontSize: 24 },
   guessCardTitle: { color: '#fff', fontSize: 12, fontWeight: '700' },
-  updateBall: { position: 'absolute', right: 16, bottom: 92, width: 64, height: 64, borderRadius: 32, backgroundColor: '#0e7490', overflow: 'hidden', justifyContent: 'center', alignItems: 'center', zIndex: 90 },
+  ballAnchor: { position: 'absolute', right: 10, bottom: 84, zIndex: 90 },
+  updateBall: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#0e7490', overflow: 'hidden', justifyContent: 'center', alignItems: 'center' },
   updateWater: { position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: '#22d3ee' },
   updateBallText: { position: 'relative', color: '#fff', fontSize: 12, fontWeight: '700', textShadowColor: '#000', textShadowRadius: 3 },
-  aiBall: { position: 'absolute', right: 16, bottom: 92, width: 58, height: 58, borderRadius: 29, backgroundColor: '#2563eb', justifyContent: 'center', alignItems: 'center', shadowColor: '#60a5fa', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.6, shadowRadius: 12, elevation: 8, zIndex: 80 },
+  aiBall: { width: 58, height: 58, borderRadius: 29, backgroundColor: '#2563eb', justifyContent: 'center', alignItems: 'center', shadowColor: '#60a5fa', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.6, shadowRadius: 12, elevation: 8 },
   aiBallCore: { width: 46, height: 46, borderRadius: 23, backgroundColor: '#3b82f6', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#93c5fd' },
   aiBallText: { color: '#fff', fontSize: 18, fontWeight: '700' },
   aiBubble: { position: 'absolute', right: 82, bottom: 104, maxWidth: 240, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 16, backgroundColor: '#1e3a8a', zIndex: 81 },

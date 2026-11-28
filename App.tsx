@@ -63,7 +63,7 @@ const NATIVE_THEMES = [
   { id:'nightglow', n:'深夜暖光', bg:'#241c22', fg:'#e6d9d5' }, { id:'glasslight', n:'磨砂浅色', bg:'#f3eaff', fg:'#332f42' },
   { id:'glassdark', n:'磨砂深色', bg:'#2a2340', fg:'#e2dcea' }, { id:'grain', n:'柔光颗粒', bg:'#f6f3ef', fg:'#3a3532' }
 ];
-const NATIVE_VERSION = 16;
+const NATIVE_VERSION = 17;
 const APK_URL = 'https://kaobei-music.pages.dev/api/apk';
 
 const COLORS = {
@@ -551,23 +551,28 @@ function App(): React.JSX.Element {
     } else start();
   }, [wakeAssistant]);
 
-  const renderSourcePills = (track: Track) => (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pillsRow}>
-      {track.sources.map((s: TrackSource, i: number) => {
-        const acc = sourceAccess(s);
-        return (
-          <TouchableOpacity key={`${s.sourceId}-${i}`} style={styles.pill} onPress={() => Alert.alert(
-            `${s.platform} · ${ACCESS_META[acc].label}`,
-            `音质：${s.quality}\n时长：${fmtTime(sourceDuration(s))}\n${s.playUrl ? '点击上方歌曲播放' : '暂无可播放地址'}`
-          )}>
-            <View style={[styles.pillDot, { backgroundColor: s.color }]} />
-            <Text style={styles.pillText}>{s.short}</Text>
-            <Text style={[styles.pillAcc, { color: ACCESS_META[acc].color }]}>{ACCESS_META[acc].label}</Text>
-          </TouchableOpacity>
-        );
-      })}
-    </ScrollView>
-  );
+  const renderSourcePills = (track: Track) => {
+    const visible = track.sources.slice(0, 3);
+    const more = track.sources.length - visible.length;
+    return (
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pillsRow}>
+        {visible.map((s: TrackSource, i: number) => {
+          const acc = sourceAccess(s);
+          return (
+            <TouchableOpacity key={`${s.sourceId}-${i}`} style={styles.pill} onPress={() => Alert.alert(
+              `${s.platform} · ${ACCESS_META[acc].label}`,
+              `音质：${s.quality}\n时长：${fmtTime(sourceDuration(s))}\n${s.playUrl ? '点击上方歌曲播放' : '暂无可播放地址'}`
+            )}>
+              <View style={[styles.pillDot, { backgroundColor: s.color }]} />
+              <Text style={styles.pillText}>{s.short}</Text>
+              <Text style={[styles.pillAcc, { color: ACCESS_META[acc].color }]}>{ACCESS_META[acc].label}</Text>
+            </TouchableOpacity>
+          );
+        })}
+        {more > 0 && <View style={styles.pill}><Text style={styles.pillText}>+{more}</Text></View>}
+      </ScrollView>
+    );
+  };
 
   const renderTrack = ({ item }: { item: Track }) => {
     const acc = accessOf(item);
@@ -1175,9 +1180,9 @@ function App(): React.JSX.Element {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: COLORS.bg },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 44, paddingBottom: 12, gap: 10 },
-  logo: { width: 40, height: 40, borderRadius: 10 },
-  brand: { color: COLORS.text, fontSize: 18, fontWeight: '800' },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 36, paddingBottom: 12, gap: 10 },
+  logo: { width: 36, height: 36, borderRadius: 10 },
+  brand: { color: COLORS.text, fontSize: 16, fontWeight: '800' },
   brandSub: { color: COLORS.sub, fontSize: 11 },
   headerSpacer: { flex: 1 },
   codeChip: { backgroundColor: COLORS.panel2, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 14 },
@@ -1214,8 +1219,8 @@ const styles = StyleSheet.create({
   shelfIcon: { color: '#fff', fontSize: 40 },
   shelfName: { color: COLORS.text, fontSize: 13, fontWeight: '600', marginTop: 6 },
   shelfSub: { color: COLORS.sub, fontSize: 11, marginTop: 2 },
-  trackCard: { flexDirection: 'row', padding: 7, backgroundColor: COLORS.panel, borderRadius: 12, marginBottom: 6, gap: 8 },
-  cover: { width: 44, height: 44, borderRadius: 8 },
+  trackCard: { flexDirection: 'row', padding: 8, backgroundColor: COLORS.panel, borderRadius: 12, marginBottom: 6, gap: 8 },
+  cover: { width: 46, height: 46, borderRadius: 8 },
   coverPh: { backgroundColor: COLORS.panel2, justifyContent: 'center', alignItems: 'center' },
   coverPhText: { color: COLORS.sub, fontSize: 24 },
   trackInfo: { flex: 1, justifyContent: 'center' },
@@ -1271,11 +1276,11 @@ const styles = StyleSheet.create({
   mineFace: { width: 30, height: 30, borderRadius: 15, borderWidth: 2, borderColor: '#00bfa5', position: 'relative', marginBottom: 2 },
   mineEye: { position: 'absolute', left: 8, top: 10, width: 4, height: 4, borderRadius: 2, backgroundColor: '#00bfa5' },
   mineSmile: { position: 'absolute', left: 8, top: 14, width: 14, height: 9, borderBottomWidth: 2, borderBottomColor: '#00bfa5', borderTopLeftRadius: 2, borderTopRightRadius: 2, borderBottomLeftRadius: 9, borderBottomRightRadius: 9 },
-  tabBar: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: COLORS.border, paddingVertical: 8 },
+  tabBar: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: COLORS.border, paddingTop: 6, paddingBottom: 10 },
   tabItem: { flex: 1, alignItems: 'center' },
   tabIcon: { fontSize: 20, color: COLORS.sub },
   tabIconOn: { color: COLORS.accent },
-  tabLabel: { color: COLORS.sub, fontSize: 11, marginTop: 2 },
+  tabLabel: { color: COLORS.sub, fontSize: 10.5, marginTop: 2 },
   tabLabelOn: { color: COLORS.accent },
   playerScreen: { flex: 1, backgroundColor: '#f2f5f7', paddingHorizontal: 20, paddingTop: 50 },
   playerTopBg: { position: 'absolute', left: 0, right: 0, top: 0, height: 300, backgroundColor: '#e3f5f3' },

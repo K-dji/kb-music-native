@@ -42,7 +42,7 @@ const SHELF = [
 ];
 
 const GUESS = ['周杰伦', '晴天', '邓紫棋', 'Taylor Swift', 'lo-fi 纯音乐', '轻音乐'];
-const NATIVE_VERSION = 10;
+const NATIVE_VERSION = 11;
 const APK_URL = 'https://kaobei-music.pages.dev/api/apk';
 
 const COLORS = {
@@ -52,7 +52,7 @@ const COLORS = {
   border: '#252c3a',
   text: '#e8ecf4',
   sub: '#8b95a9',
-  accent: '#22d3ee',
+  accent: '#ff6b9a',
   accent2: '#7c5cff'
 };
 
@@ -121,6 +121,7 @@ function App(): React.JSX.Element {
   const searchSeq = useRef(0);
   const spin = useRef(new Animated.Value(0)).current;
   const mineAnim = useRef(new Animated.Value(0)).current;
+  const lyricAnim = useRef(new Animated.Value(0)).current;
   const [vinylMode, setVinylMode] = useState(true);
   const playState = usePlaybackState();
   const { position, duration } = useProgress(500);
@@ -133,6 +134,15 @@ function App(): React.JSX.Element {
     }
   }, [isPlaying, vinylMode, spin]);
   const spinAngle = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+
+  useEffect(() => {
+    Animated.timing(lyricAnim, {
+      toValue: lyricFocus ? 1 : 0,
+      duration: 480,
+      easing: (t: number) => 1 - Math.pow(1 - t, 3),
+      useNativeDriver: true
+    }).start();
+  }, [lyricFocus, lyricAnim]);
 
   useEffect(() => {
     let alive = true;
@@ -870,9 +880,20 @@ function App(): React.JSX.Element {
               Animated.spring(mineAnim, { toValue: 1, friction: 3, tension: 180, useNativeDriver: true }).start(() => mineAnim.setValue(0));
             }
           }}>
-            <Animated.Text style={[styles.tabIcon, tab === id && styles.tabIconOn, id === 'library' && styles.mineIcon, {
-              transform: id === 'library' ? [{ scale: mineAnim.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 1.35, 1] }) }, { rotate: mineAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] }) }] : []
-            }]}>{icon}</Animated.Text>
+            {id === 'library' ? (
+              <Animated.View style={[styles.mineFace, {
+                transform: [
+                  { scale: mineAnim.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 1.22, 1] }) },
+                  { rotate: mineAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] }) }
+                ]
+              }]}>
+                <View style={styles.mineEye} />
+                <View style={[styles.mineEye, { left: 18 }]} />
+                <View style={styles.mineSmile} />
+              </Animated.View>
+            ) : (
+              <Text style={[styles.tabIcon, tab === id && styles.tabIconOn]}>{icon}</Text>
+            )}
             <Text style={[styles.tabLabel, tab === id && styles.tabLabelOn]}>{label}</Text>
           </TouchableOpacity>
         ))}
@@ -892,18 +913,33 @@ function App(): React.JSX.Element {
               <Text style={styles.playerModeText}>{vinylMode ? '◉ 唱片' : '□ 简约'}</Text>
             </TouchableOpacity>
           </View>
+          <Animated.View style={[styles.lyricRail, {
+            opacity: lyricAnim,
+            transform: [{ translateX: lyricAnim.interpolate({ inputRange: [0, 1], outputRange: [24, 0] }) }]
+          }]}>
+            <TouchableOpacity style={styles.lyricRailBtn} onPress={() => setLyricFocus(true)}><Text style={styles.lyricRailText}>词</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.lyricRailBtn} onPress={() => setLyricFocus(true)}><Text style={styles.lyricRailText}>译</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.lyricRailBtn} onPress={() => setLyricFocus(false)}><Text style={styles.lyricRailText}>大</Text></TouchableOpacity>
+          </Animated.View>
           {currentTrack && (
             <>
-              {!lyricFocus && <TouchableOpacity activeOpacity={0.9} onPress={() => setLyricFocus(true)}>
-              <Animated.View style={[styles.playerCoverWrap, { transform: [{ rotate: spinAngle }] }]}>
-                {currentTrack.cover ? (
-                  <Image source={{ uri: currentTrack.cover }} style={[styles.playerCover, vinylMode && styles.playerCoverRound]} />
-                ) : (
-                  <View style={[styles.playerCover, styles.playerCoverPh, vinylMode && styles.playerCoverRound]}><Text style={styles.playerCoverPhText}>♪</Text></View>
-                )}
-                {vinylMode && <View style={styles.vinylHole} />}
-              </Animated.View>
-              </TouchableOpacity>}
+              <TouchableOpacity activeOpacity={0.9} onPress={() => setLyricFocus(v => !v)}>
+                <Animated.View style={[styles.playerCoverWrap, {
+                  transform: [
+                    { rotate: spinAngle },
+                    { translateX: lyricAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 108] }) },
+                    { translateY: lyricAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -180] }) },
+                    { scale: lyricAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0.22] }) }
+                  ]
+                }]}>
+                  {currentTrack.cover ? (
+                    <Image source={{ uri: currentTrack.cover }} style={[styles.playerCover, vinylMode && styles.playerCoverRound]} />
+                  ) : (
+                    <View style={[styles.playerCover, styles.playerCoverPh, vinylMode && styles.playerCoverRound]}><Text style={styles.playerCoverPhText}>♪</Text></View>
+                  )}
+                  {vinylMode && <View style={styles.vinylHole} />}
+                </Animated.View>
+              </TouchableOpacity>
               <TouchableOpacity style={styles.playerMetaBox} activeOpacity={0.9} onPress={() => setLyricFocus(v => !v)}>
                 <Text style={styles.playerTitle}>{currentTrack.title}</Text>
                 <Text style={styles.playerArtist}>{currentTrack.artist}{currentTrack.year ? ' · ' + currentTrack.year : ''}</Text>
@@ -911,7 +947,7 @@ function App(): React.JSX.Element {
               <View style={styles.lyricBox}>
                 <ScrollView ref={lyricScrollRef} contentContainerStyle={styles.lyricContent}>
                   {lyrics.length ? lyrics.map((l, i) => (
-                    <Text key={i} style={[styles.lyricLine, i === currentLyricIdx && styles.lyricLineOn]}>{l.text}</Text>
+                    <Text key={i} style={[styles.lyricLine, lyricFocus && styles.lyricLineList, i === currentLyricIdx && styles.lyricLineOn, i === currentLyricIdx && lyricFocus && styles.lyricLineListOn]}>{l.text}</Text>
                   )) : <Text style={styles.lyricEmpty}>暂无歌词</Text>}
                 </ScrollView>
               </View>
@@ -1107,7 +1143,9 @@ const styles = StyleSheet.create({
   miniArtist: { color: COLORS.sub, fontSize: 11 },
   miniPlay: { padding: 8 },
   miniPlayText: { color: COLORS.accent, fontSize: 18 },
-  mineIcon: { color: '#ff6b9a', fontSize: 24, textShadowColor: '#ff6b9a', textShadowRadius: 8 },
+  mineFace: { width: 30, height: 30, borderRadius: 15, borderWidth: 2, borderColor: '#ff6b9a', position: 'relative', marginBottom: 2 },
+  mineEye: { position: 'absolute', left: 8, top: 10, width: 4, height: 4, borderRadius: 2, backgroundColor: '#ff6b9a' },
+  mineSmile: { position: 'absolute', left: 8, top: 14, width: 14, height: 9, borderBottomWidth: 2, borderBottomColor: '#ff6b9a', borderTopLeftRadius: 2, borderTopRightRadius: 2, borderBottomLeftRadius: 9, borderBottomRightRadius: 9 },
   tabBar: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: COLORS.border, paddingVertical: 8 },
   tabItem: { flex: 1, alignItems: 'center' },
   tabIcon: { fontSize: 20, color: COLORS.sub },
@@ -1115,7 +1153,12 @@ const styles = StyleSheet.create({
   tabLabel: { color: COLORS.sub, fontSize: 11, marginTop: 2 },
   tabLabelOn: { color: COLORS.accent },
   playerScreen: { flex: 1, backgroundColor: '#0b1220', paddingHorizontal: 20, paddingTop: 50 },
-  playerTopBg: { position: 'absolute', left: 0, right: 0, top: 0, height: 300, backgroundColor: '#0e6f78' },
+  playerTopBg: { position: 'absolute', left: 0, right: 0, top: 0, height: 300, backgroundColor: '#8a3b60' },
+  lyricRail: { position: 'absolute', right: 12, top: '34%', zIndex: 10 },
+  lyricRailBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: 'rgba(255,107,154,.25)', borderWidth: 1, borderColor: 'rgba(255,255,255,.18)', justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
+  lyricRailText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  lyricLineList: { fontSize: 15, lineHeight: 30, opacity: 0.55 },
+  lyricLineListOn: { fontSize: 19, lineHeight: 34, opacity: 1, color: '#fff' },
   playerClose: { alignSelf: 'flex-start', marginBottom: 30 },
   playerCloseText: { color: COLORS.sub, fontSize: 15 },
   playerTitle: { color: COLORS.text, fontSize: 22, fontWeight: '800', textAlign: 'center' },

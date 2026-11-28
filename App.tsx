@@ -63,7 +63,7 @@ const NATIVE_THEMES = [
   { id:'nightglow', n:'深夜暖光', bg:'#241c22', fg:'#e6d9d5' }, { id:'glasslight', n:'磨砂浅色', bg:'#f3eaff', fg:'#332f42' },
   { id:'glassdark', n:'磨砂深色', bg:'#2a2340', fg:'#e2dcea' }, { id:'grain', n:'柔光颗粒', bg:'#f6f3ef', fg:'#3a3532' }
 ];
-const NATIVE_VERSION = 17;
+const NATIVE_VERSION = 18;
 const APK_URL = 'https://kaobei-music.pages.dev/api/apk';
 
 const COLORS = {
@@ -707,35 +707,38 @@ function App(): React.JSX.Element {
       {/* 内容区 */}
       {tab === 'discover' && (
         <ScrollView style={styles.content}>
-          <Text style={styles.sectionTitle}>发现音乐</Text>
-          <View style={styles.shelf}>
-            {SHELF.map((p, i) => (
-              <TouchableOpacity key={i} style={styles.shelfCard} onPress={() => { setQuery(p.q); doSearch(p.q); }} activeOpacity={0.8}>
-                <View style={[styles.shelfCover, { backgroundColor: p.c2 }]}>
-                  <Text style={styles.shelfIcon}>{p.icon}</Text>
-                </View>
-                <Text style={styles.shelfName} numberOfLines={1}>{p.name}</Text>
-                <Text style={styles.shelfSub} numberOfLines={1}>{p.sub}</Text>
-              </TouchableOpacity>
-            ))}
+          <View style={styles.mhTop}>
+            <Text style={[styles.mhTab, styles.mhTabOn]}>发现</Text>
+            <Text style={styles.mhTab}>免费听</Text>
+            <Text style={styles.mhTab}>乐库</Text>
           </View>
-          <Text style={styles.sectionTitle}>猜你喜欢</Text>
-          <TouchableOpacity style={styles.guessHero} activeOpacity={0.85} onPress={() => { setQuery(GUESS[0]); doSearch(GUESS[0]); }}>
-            <View style={styles.guessHeroInfo}>
-              <Text style={styles.guessHeroTitle}>夜深了</Text>
-              <Text style={styles.guessHeroSub}>猜你喜欢 · {GUESS[0]}</Text>
-              <Text style={styles.guessHeroBtn}>▶ 播放推荐</Text>
-            </View>
-            <View style={styles.guessHeroArt}><Text style={styles.guessHeroArtText}>♪</Text></View>
-          </TouchableOpacity>
-          <View style={styles.guessGrid}>
-            {GUESS.slice(1).map((g, i) => (
-              <TouchableOpacity key={g} style={[styles.guessCard, { backgroundColor: ['#7c5cff', '#0ea5e9', '#f43f5e', '#f59e0b', '#10b981'][i % 5] }]} onPress={() => { setQuery(g); doSearch(g); }}>
-                <Text style={styles.guessCardIcon}>♪</Text>
-                <Text style={styles.guessCardTitle}>{g}</Text>
-              </TouchableOpacity>
-            ))}
+          <View style={styles.mhHeroRow}>
+            <TouchableOpacity style={styles.mhHero} activeOpacity={0.85} onPress={() => { setQuery(SHELF[0].q); doSearch(SHELF[0].q); }}>
+              <Text style={styles.mhHeroTitle}>宅家 <Text style={styles.mhHeroAccent}>RadiO</Text> ⇄</Text>
+              <Text style={styles.mhHeroSub}>Story · Taylor Swift</Text>
+              <View style={styles.mhPlay}><Text style={styles.mhPlayText}>▶</Text></View>
+            </TouchableOpacity>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.mhCovers}>
+              {SHELF.map(p => (
+                <TouchableOpacity key={p.name} style={[styles.mhCover, { backgroundColor: p.c2 }]} onPress={() => { setQuery(p.q); doSearch(p.q); }}>
+                  <Text style={styles.mhCoverTitle}>{p.name}</Text>
+                  <Text style={styles.mhCoverSub}>{p.sub}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
           </View>
+          <Text style={styles.mhNote}>宝藏音乐故事 · 为你推荐</Text>
+          <View style={styles.mhTitleRow}><Text style={styles.mhTitle}>私人专属好歌</Text><Text style={styles.mhTitleIcon}>▶</Text><Text style={styles.mhMore}>›</Text></View>
+          {GUESS.slice(0, 6).map(g => (
+            <TouchableOpacity key={g} style={styles.mhRow} onPress={() => { setQuery(g); doSearch(g); }}>
+              <View style={styles.mhCoverSm}><Text style={styles.mhCoverSmText}>♪</Text></View>
+              <View style={styles.mhInfo}>
+                <Text style={styles.mhSong}>{g}</Text>
+                <Text style={styles.mhArtist}>推荐 · 点击发现相似好歌</Text>
+              </View>
+              <Text style={styles.mhHeart}>♡</Text>
+            </TouchableOpacity>
+          ))}
         </ScrollView>
       )}
 
@@ -1260,6 +1263,32 @@ const styles = StyleSheet.create({
   miniArtist: { color: COLORS.sub, fontSize: 11 },
   miniPlay: { padding: 8 },
   miniPlayText: { color: COLORS.accent, fontSize: 18 },
+  mhTop: { flexDirection: 'row', alignItems: 'center', gap: 16, paddingVertical: 12 },
+  mhTab: { color: COLORS.sub, fontSize: 15 },
+  mhTabOn: { color: COLORS.text, fontSize: 19, fontWeight: '800' },
+  mhHeroRow: { flexDirection: 'row', gap: 10, alignItems: 'stretch' },
+  mhHero: { flex: 0, width: 165, minHeight: 132, padding: 12, borderRadius: 18, backgroundColor: '#ffe3c9' },
+  mhHeroTitle: { color: '#4a3329', fontSize: 17, fontWeight: '800' },
+  mhHeroAccent: { color: '#e2673b' },
+  mhHeroSub: { color: '#6b5340', fontSize: 11, marginTop: 6 },
+  mhPlay: { position: 'absolute', right: 10, bottom: 10, width: 30, height: 30, borderRadius: 15, backgroundColor: '#ff7a3c', justifyContent: 'center', alignItems: 'center' },
+  mhPlayText: { color: '#fff', fontSize: 12 },
+  mhCovers: { flex: 1 },
+  mhCover: { width: 88, height: 88, borderRadius: 44, marginRight: 10, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 6 },
+  mhCoverTitle: { color: '#fff', fontSize: 11, fontWeight: '700', textAlign: 'center' },
+  mhCoverSub: { color: '#fff', fontSize: 9, marginTop: 3, textAlign: 'center' },
+  mhNote: { color: COLORS.sub, fontSize: 11, marginTop: 14 },
+  mhTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginVertical: 10 },
+  mhTitle: { color: COLORS.text, fontSize: 19, fontWeight: '800' },
+  mhTitleIcon: { color: COLORS.accent, fontSize: 13 },
+  mhMore: { color: COLORS.sub, marginLeft: 'auto' },
+  mhRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
+  mhCoverSm: { width: 48, height: 48, borderRadius: 8, backgroundColor: COLORS.panel2, justifyContent: 'center', alignItems: 'center' },
+  mhCoverSmText: { color: COLORS.sub, fontSize: 18 },
+  mhInfo: { flex: 1 },
+  mhSong: { color: COLORS.text, fontSize: 14, fontWeight: '700' },
+  mhArtist: { color: COLORS.sub, fontSize: 11, marginTop: 3 },
+  mhHeart: { color: COLORS.sub, fontSize: 18 },
   mineHeader: { alignItems: 'center', padding: 18, borderRadius: 20, backgroundColor: '#dff8f5', marginBottom: 14 },
   mineAvatar: { width: 78, height: 78, borderRadius: 39, marginBottom: 10 },
   mineName: { color: '#173c3a', fontSize: 18, fontWeight: '800' },

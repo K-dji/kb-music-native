@@ -4,6 +4,7 @@ import {
   Alert,
   Animated,
   Clipboard,
+  Dimensions,
   Linking,
   FlatList,
   Image,
@@ -42,7 +43,7 @@ const SHELF = [
 ];
 
 const GUESS = ['周杰伦', '晴天', '邓紫棋', 'Taylor Swift', 'lo-fi 纯音乐', '轻音乐'];
-const NATIVE_VERSION = 11;
+const NATIVE_VERSION = 12;
 const APK_URL = 'https://kaobei-music.pages.dev/api/apk';
 
 const COLORS = {
@@ -102,15 +103,23 @@ function App(): React.JSX.Element {
   const [lyricFocus, setLyricFocus] = useState(false);
   const [voiceAwake, setVoiceAwake] = useState(false);
   const [voiceText, setVoiceText] = useState('');
+  const [voiceInputOpen, setVoiceInputOpen] = useState(false);
+  const [voiceInputText, setVoiceInputText] = useState('');
   const voiceAwakeRef = useRef(false);
   const volumeBeforeWake = useRef(0.8);
   const ballPos = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const ballPan = useRef(PanResponder.create({
     onMoveShouldSetPanResponder: () => true,
-    onPanResponderMove: Animated.event(
-      [null, { dx: ballPos.x, dy: ballPos.y }],
-      { useNativeDriver: false }
-    ),
+    onPanResponderMove: (_e, g) => {
+      const w = Dimensions.get('window').width;
+      const h = Dimensions.get('window').height;
+      const baseX = w - 10 - 58;
+      const baseY = h - 84 - 58;
+      const nx = Math.max(8 - baseX, Math.min(w - 66 - baseX, g.dx));
+      const ny = Math.max(70 - baseY, Math.min(h - 150 - baseY, g.dy));
+      ballPos.x.setValue(nx);
+      ballPos.y.setValue(ny);
+    },
     onPanResponderRelease: () => undefined
   })).current;
   const [updateInfo, setUpdateInfo] = useState<{ remote: number; url: string } | null>(null);
@@ -504,12 +513,13 @@ function App(): React.JSX.Element {
       return;
     }
     wakeAssistant();
-    const start = () => { void Voice.start('zh-CN').catch(() => setVoiceText('麦克风不可用，请检查权限')); };
+    const fallback = () => { setVoiceText('语音识别不可用，请输入命令'); setVoiceInputOpen(true); };
+    const start = () => { void Voice.start('zh-CN').catch(fallback); };
     if (Platform.OS === 'android') {
       void PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO).then(granted => {
         if (granted === PermissionsAndroid.RESULTS.GRANTED) start();
-        else setVoiceText('需要麦克风权限才能唤醒');
-      });
+        else fallback();
+      }).catch(fallback);
     } else start();
   }, [wakeAssistant]);
 
@@ -721,6 +731,22 @@ function App(): React.JSX.Element {
             </>
           ) : (
             <>
+              {/* 我的：模仿网易云个人主页头部 */}
+              <View style={styles.mineHeader}>
+                <Image source={require('./assets/logo.png')} style={styles.mineAvatar} />
+                <Text style={styles.mineName}>{profile?.nickname || '音乐爱好者'}</Text>
+                <Text style={styles.mineSub}>本地音乐库 · 数据仅保存在本机</Text>
+                <View style={styles.mineStats}>
+                  <Text style={styles.mineStat}>喜欢 {favorites.length}</Text>
+                  <Text style={styles.mineStat}>收藏 {collected.length}</Text>
+                  <Text style={styles.mineStat}>最近 {recent.length}</Text>
+                </View>
+                <View style={styles.mineTiles}>
+                  {([['liked', '♥ 喜欢'], ['collected', '★ 收藏'], ['recent', '◷ 最近'], ['playlists', '♫ 歌单']] as const).map(([id, label]) => (
+                    <TouchableOpacity key={id} style={styles.mineTile} onPress={() => setLibrarySection(id)}><Text style={styles.mineTileText}>{label}</Text></TouchableOpacity>
+                  ))}
+                </View>
+              </View>
               <Text style={styles.sectionTitle}>我的音乐库</Text>
               <View style={styles.segmentRow}>
                 {([['liked', '♥ 我喜欢'], ['collected', '★ 收藏'], ['recent', '◷ 最近'], ['playlists', '♫ 歌单']] as const).map(([id, label]) => (
@@ -816,6 +842,26 @@ function App(): React.JSX.Element {
           </TouchableOpacity>
         </TouchableOpacity>
       )}
+
+      {/* 语音识别不可用时的文字命令兜底 */}
+      <Modal visible={voiceInputOpen} transparent animationType="fade" onRequestClose={() => setVoiceInputOpen(false)}>
+        <View style={styles.detailOverlay}>
+          <View style={styles.detailCard}>
+            <Text style={styles.modalTitle}>告诉 KB Music</Text>
+            <Text style={styles.hint}>例如：播放晴天、小声一点、暂停</Text>
+            <TextInput style={styles.cardInput} value={voiceInputText} onChangeText={setVoiceInputText} placeholder="输入命令" placeholderTextColor={COLORS.sub} autoFocus />
+            <View style={styles.rowButtons}>
+              <TouchableOpacity style={styles.smallBtnGhost} onPress={() => setVoiceInputOpen(false)}><Text style={styles.smallBtnGhostText}>取消</Text></TouchableOpacity>
+              <TouchableOpacity style={styles.smallBtn} onPress={() => {
+                const cmd = voiceInputText.trim();
+                setVoiceInputOpen(false);
+                setVoiceInputText('');
+                if (cmd) void runVoiceCommand(cmd);
+              }}><Text style={styles.smallBtnText}>执行</Text></TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* 设置 / 音源设置 */}
       <Modal visible={settingsOpen} transparent animationType="slide" onRequestClose={() => setSettingsOpen(false)}>
@@ -1102,8 +1148,8 @@ const styles = StyleSheet.create({
   shelfIcon: { color: '#fff', fontSize: 40 },
   shelfName: { color: COLORS.text, fontSize: 13, fontWeight: '600', marginTop: 6 },
   shelfSub: { color: COLORS.sub, fontSize: 11, marginTop: 2 },
-  trackCard: { flexDirection: 'row', padding: 10, backgroundColor: COLORS.panel, borderRadius: 12, marginBottom: 8, gap: 10 },
-  cover: { width: 56, height: 56, borderRadius: 8 },
+  trackCard: { flexDirection: 'row', padding: 7, backgroundColor: COLORS.panel, borderRadius: 12, marginBottom: 6, gap: 8 },
+  cover: { width: 44, height: 44, borderRadius: 8 },
   coverPh: { backgroundColor: COLORS.panel2, justifyContent: 'center', alignItems: 'center' },
   coverPhText: { color: COLORS.sub, fontSize: 24 },
   trackInfo: { flex: 1, justifyContent: 'center' },
@@ -1111,7 +1157,7 @@ const styles = StyleSheet.create({
   trackArtist: { color: COLORS.sub, fontSize: 12, marginTop: 2 },
   badge: { alignSelf: 'flex-start', borderWidth: 1, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 1, marginTop: 4 },
   badgeText: { fontSize: 10, fontWeight: '700' },
-  pillsRow: { marginTop: 6 },
+  pillsRow: { marginTop: 3 },
   pill: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.panel2, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4, marginRight: 6, gap: 4 },
   pillDot: { width: 6, height: 6, borderRadius: 3 },
   pillText: { color: COLORS.text, fontSize: 10 },
@@ -1143,6 +1189,15 @@ const styles = StyleSheet.create({
   miniArtist: { color: COLORS.sub, fontSize: 11 },
   miniPlay: { padding: 8 },
   miniPlayText: { color: COLORS.accent, fontSize: 18 },
+  mineHeader: { alignItems: 'center', padding: 18, borderRadius: 20, backgroundColor: '#143b3b', marginBottom: 14 },
+  mineAvatar: { width: 78, height: 78, borderRadius: 39, marginBottom: 10 },
+  mineName: { color: '#fff', fontSize: 18, fontWeight: '800' },
+  mineSub: { color: '#9fd8d0', fontSize: 11, marginTop: 4 },
+  mineStats: { flexDirection: 'row', gap: 18, marginTop: 12 },
+  mineStat: { color: '#d6fffa', fontSize: 12 },
+  mineTiles: { flexDirection: 'row', gap: 8, marginTop: 14 },
+  mineTile: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 12, backgroundColor: 'rgba(255,255,255,.09)' },
+  mineTileText: { color: '#eafffb', fontSize: 11 },
   mineFace: { width: 30, height: 30, borderRadius: 15, borderWidth: 2, borderColor: '#00bfa5', position: 'relative', marginBottom: 2 },
   mineEye: { position: 'absolute', left: 8, top: 10, width: 4, height: 4, borderRadius: 2, backgroundColor: '#00bfa5' },
   mineSmile: { position: 'absolute', left: 8, top: 14, width: 14, height: 9, borderBottomWidth: 2, borderBottomColor: '#00bfa5', borderTopLeftRadius: 2, borderTopRightRadius: 2, borderBottomLeftRadius: 9, borderBottomRightRadius: 9 },

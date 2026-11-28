@@ -239,7 +239,7 @@ function extractArray(data: unknown): Record<string, unknown>[] {
 async function searchMeting(src: SourceDef, query: string, cfg: AppConfig): Promise<Record<string, unknown>[]> {
   const conf = cfg.sources[src.id];
   const base = sanitizeBase(src.id, conf?.base || src.defaultBase || METING_PRIMARY);
-  const url = `${base.replace(/\/$/, '')}?server=${encodeURIComponent(src.server || 'netease')}&type=search&keyword=${encodeURIComponent(query)}&limit=${cfg.limit}`;
+  const url = `${base.replace(/\/$/, '')}?server=${encodeURIComponent(src.server || 'netease')}&type=search&id=${encodeURIComponent(query)}&limit=${cfg.limit}`;
   const data = await fetchJson(url, cfg.timeout * 1000);
   return extractArray(data).slice(0, cfg.limit);
 }

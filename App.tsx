@@ -6,6 +6,7 @@ import {
   Animated,
   Clipboard,
   Dimensions,
+  Easing,
   Linking,
   FlatList,
   Image,
@@ -63,7 +64,7 @@ const NATIVE_THEMES = [
   { id:'nightglow', n:'深夜暖光', bg:'#241c22', fg:'#e6d9d5' }, { id:'glasslight', n:'磨砂浅色', bg:'#f3eaff', fg:'#332f42' },
   { id:'glassdark', n:'磨砂深色', bg:'#2a2340', fg:'#e2dcea' }, { id:'grain', n:'柔光颗粒', bg:'#f6f3ef', fg:'#3a3532' }
 ];
-const NATIVE_VERSION = 18;
+const NATIVE_VERSION = 19;
 const APK_URL = 'https://kaobei-music.pages.dev/api/apk';
 
 const COLORS = {
@@ -92,7 +93,8 @@ function AccessBadge({ access }: { access: Access }): React.JSX.Element {
 }
 
 function App(): React.JSX.Element {
-  const { width } = useWindowDimensions();
+  const { width, height: screenH } = useWindowDimensions();
+  const coverSize = Math.max(140, Math.min(240, Math.round(width * 0.6), Math.round(screenH * 0.3)));
   const [tab, setTab] = useState<Tab>('discover');
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Track[]>([]);
@@ -107,6 +109,16 @@ function App(): React.JSX.Element {
   const [themeId, setThemeId] = useState('default');
   const activeTheme = NATIVE_THEMES.find(t => t.id === themeId) || NATIVE_THEMES[0];
   const themeBg = themeId === 'default' ? COLORS.bg : activeTheme.bg;
+  const hex = themeBg.replace('#', '');
+  const bgLuma = hex.length >= 6
+    ? 0.299 * parseInt(hex.slice(0, 2), 16) + 0.587 * parseInt(hex.slice(2, 4), 16) + 0.114 * parseInt(hex.slice(4, 6), 16)
+    : 0;
+  const playerLight = bgLuma > 140;
+  const pf = playerLight ? '#1c1c1e' : '#eef2f8';
+  const ps = playerLight ? '#596472' : '#aab5c7';
+  const ctrlBg = playerLight ? 'rgba(20,24,33,.08)' : 'rgba(255,255,255,.1)';
+  const pfStyle = { color: pf };
+  const psStyle = { color: ps };
   const [profile, setProfile] = useState<Profile | null>(null);
   const [favorites, setFavorites] = useState<string[]>([]);
   const [favoriteTracks, setFavoriteTracks] = useState<Track[]>([]);
@@ -125,7 +137,10 @@ function App(): React.JSX.Element {
   const [playerOpen, setPlayerOpen] = useState(false);
   const [lyricFocus, setLyricFocus] = useState(false);
   const [lyricStage, setLyricStage] = useState<(typeof LYRIC_STAGES)[number]>('fashion');
-  const touchStartY = useRef<number | null>(null);
+  // 一镜到底 morph：0=迷你条 1=全屏；下滑跟手用 dragY，收起回弹由 spring 完成
+  const morph = useRef(new Animated.Value(0)).current;
+  const dragY = useRef(new Animated.Value(0)).current;
+  const morphClosing = useRef(false);
   const [voiceAwake, setVoiceAwake] = useState(false);
   const [voiceText, setVoiceText] = useState('');
   const [voiceInputOpen, setVoiceInputOpen] = useState(false);
@@ -174,9 +189,72 @@ function App(): React.JSX.Element {
       toValue: lyricFocus ? 1 : 0,
       duration: 480,
       easing: (t: number) => 1 - Math.pow(1 - t, 3),
-      useNativeDriver: true
+      useNativeDriver: false
     }).start();
   }, [lyricFocus, lyricAnim]);
+
+  const playerOpenRef = useRef(false);
+  const openPlayer = useCallback(() => {
+    if (playerOpenRef.current) return;
+    playerOpenRef.current = true;
+    setLyricFocus(false);
+    setPlayerOpen(true);
+    morph.setValue(0);
+    dragY.setValue(0);
+    requestAnimationFrame(() => {
+      Animated.timing(morph, {
+        toValue: 1, duration: 540,
+        easing: Easing.bezier(0.2, 0.9, 0.25, 1),
+        useNativeDriver: true
+      }).start();
+    });
+  }, [morph, dragY]);
+
+  const closePlayer = useCallback(() => {
+    if (!playerOpenRef.current || morphClosing.current) return;
+    morphClosing.current = true;
+    Animated.parallel([
+      Animated.timing(morph, { toValue: 0, duration: 320, easing: Easing.in(Easing.quad), useNativeDriver: true }),
+      Animated.timing(dragY, { toValue: 0, duration: 320, easing: Easing.in(Easing.quad), useNativeDriver: true })
+    ]).start(() => {
+      morphClosing.current = false;
+      playerOpenRef.current = false;
+      setPlayerOpen(false);
+    });
+  }, [morph, dragY]);
+
+  const paging = useRef({ active: false, startY: 0, lastY: 0, startT: 0 }).current;
+  const onSheetTouchStart = useCallback((y: number) => {
+    if (morphClosing.current || y > screenH * 0.55) { paging.active = false; return; }
+    paging.active = true; paging.startY = y; paging.lastY = y; paging.startT = Date.now();
+  }, [paging, screenH]);
+  const onSheetTouchMove = useCallback((y: number) => {
+    if (!paging.active) return;
+    paging.lastY = y;
+    dragY.setValue(Math.min(Math.max(0, y - paging.startY) * 0.9, screenH * 0.6));
+  }, [paging, dragY, screenH]);
+  const onSheetTouchEnd = useCallback(() => {
+    if (!paging.active) return;
+    paging.active = false;
+    const dy = Math.max(0, paging.lastY - paging.startY);
+    const velocity = dy / Math.max(1, Date.now() - paging.startT);
+    if (dy > 120 || velocity > 0.5) closePlayer();
+    else Animated.spring(dragY, { toValue: 0, useNativeDriver: true, damping: 22, stiffness: 260 }).start();
+  }, [paging, dragY, closePlayer]);
+
+  const sheetTranslateY = Animated.add(
+    morph.interpolate({ inputRange: [0, 1], outputRange: [screenH * 0.06, 0], extrapolate: 'clamp' }),
+    dragY
+  );
+  const sheetOpacity = morph.interpolate({ inputRange: [0, 0.35], outputRange: [0.15, 1], extrapolate: 'clamp' });
+  const seekWidth = useRef(0);
+  const coverMorphScale = morph.interpolate({ inputRange: [0, 1], outputRange: [0.22, 1], extrapolate: 'clamp' });
+  const coverLyricScale = lyricAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0.9], extrapolate: 'clamp' });
+  const coverScale = Animated.multiply(coverMorphScale, coverLyricScale);
+  const coverMorphY = morph.interpolate({ inputRange: [0, 1], outputRange: [screenH * 0.2, 0], extrapolate: 'clamp' });
+  const coverLyricY = lyricAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -screenH * 0.26], extrapolate: 'clamp' });
+  const coverY = Animated.add(coverMorphY, coverLyricY);
+  const lyricPad = Math.max(96, Math.round(screenH * 0.38));
 
   useEffect(() => {
     let alive = true;
@@ -272,7 +350,7 @@ function App(): React.JSX.Element {
     if (ok) {
       setCurrentTrack(track);
       pushRecent(track);
-      setPlayerOpen(true);
+      openPlayer();
       const src = track.sources.find(s => !s.failed && sourceAccess(s) === 'free') || track.sources[0];
       if (src?.lrcUrl) {
         const lines = await fetchLrc(src.lrcUrl);
@@ -283,7 +361,7 @@ function App(): React.JSX.Element {
     } else {
       Alert.alert('播放失败', '该歌曲的所有音源均不可用，请换一首或检查网络。');
     }
-  }, [pushRecent]);
+  }, [pushRecent, openPlayer]);
 
   const playRelative = useCallback((delta: number) => {
     const list = visibleResults.length ? visibleResults : results;
@@ -709,8 +787,12 @@ function App(): React.JSX.Element {
         <ScrollView style={styles.content}>
           <View style={styles.mhTop}>
             <Text style={[styles.mhTab, styles.mhTabOn]}>发现</Text>
-            <Text style={styles.mhTab}>免费听</Text>
-            <Text style={styles.mhTab}>乐库</Text>
+            <TouchableOpacity onPress={() => { setFreeOnly(true); setTab('search'); }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Text style={styles.mhTab}>免费听</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setTab('library')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Text style={styles.mhTab}>乐库</Text>
+            </TouchableOpacity>
           </View>
           <View style={styles.mhHeroRow}>
             <TouchableOpacity style={styles.mhHero} activeOpacity={0.85} onPress={() => { setQuery(SHELF[0].q); doSearch(SHELF[0].q); }}>
@@ -728,7 +810,10 @@ function App(): React.JSX.Element {
             </ScrollView>
           </View>
           <Text style={styles.mhNote}>宝藏音乐故事 · 为你推荐</Text>
-          <View style={styles.mhTitleRow}><Text style={styles.mhTitle}>私人专属好歌</Text><Text style={styles.mhTitleIcon}>▶</Text><Text style={styles.mhMore}>›</Text></View>
+          <TouchableOpacity style={styles.mhTitleRow} onPress={() => { setQuery(GUESS[0]); doSearch(GUESS[0]); }} hitSlop={{ top: 6, bottom: 6 }}>
+            <Text style={styles.mhTitle}>私人专属好歌</Text>
+            <Text style={styles.mhMore}>发现更多 ›</Text>
+          </TouchableOpacity>
           {GUESS.slice(0, 6).map(g => (
             <TouchableOpacity key={g} style={styles.mhRow} onPress={() => { setQuery(g); doSearch(g); }}>
               <View style={styles.mhCoverSm}><Text style={styles.mhCoverSmText}>♪</Text></View>
@@ -736,7 +821,7 @@ function App(): React.JSX.Element {
                 <Text style={styles.mhSong}>{g}</Text>
                 <Text style={styles.mhArtist}>推荐 · 点击发现相似好歌</Text>
               </View>
-              <Text style={styles.mhHeart}>♡</Text>
+              <Text style={styles.mhMore}>›</Text>
             </TouchableOpacity>
           ))}
         </ScrollView>
@@ -865,18 +950,20 @@ function App(): React.JSX.Element {
         </ScrollView>
       )}
 
-      {/* 迷你播放条 */}
+      {/* 迷你播放条：点击任意非按钮区域一镜到底展开；播放键独立，避免嵌套点击 */}
       {currentTrack && (
-        <TouchableOpacity style={styles.miniPlayer} onPress={() => { setLyricFocus(false); setPlayerOpen(true); }} activeOpacity={0.9}>
-          <Image source={{ uri: currentTrack.cover || (sourceAccess(currentTrack.sources[0]) ? '' : '') }} style={styles.miniCover} />
-          <View style={styles.miniInfo}>
-            <Text style={styles.miniTitle} numberOfLines={1}>{currentTrack.title}</Text>
-            <Text style={styles.miniArtist} numberOfLines={1}>{currentTrack.artist}</Text>
-          </View>
-          <TouchableOpacity style={styles.miniPlay} onPress={() => void togglePlayPause()}>
+        <View style={styles.miniPlayer}>
+          <TouchableOpacity style={styles.miniMain} onPress={openPlayer} activeOpacity={0.9}>
+            <Image source={{ uri: currentTrack.cover || '' }} style={styles.miniCover} />
+            <View style={styles.miniInfo}>
+              <Text style={styles.miniTitle} numberOfLines={1}>{currentTrack.title}</Text>
+              <Text style={styles.miniArtist} numberOfLines={1}>{currentTrack.artist}</Text>
+            </View>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.miniPlay} onPress={() => void togglePlayPause()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
             <Text style={styles.miniPlayText}>{isPlaying ? '❚❚' : '▶'}</Text>
           </TouchableOpacity>
-        </TouchableOpacity>
+        </View>
       )}
 
       {/* 语音识别不可用时的文字命令兜底 */}
@@ -1003,111 +1090,117 @@ function App(): React.JSX.Element {
         ))}
       </View>
 
-      {/* 全屏播放页 - 酷狗概念版风格 */}
-      <Modal visible={playerOpen} animationType="slide" onRequestClose={() => setPlayerOpen(false)}>
-        <View
-          style={[styles.playerScreen, { backgroundColor: themeBg }]}
-          onTouchStart={e => { touchStartY.current = e.nativeEvent.touches[0].pageY; }}
-          onTouchEnd={e => {
-            if (touchStartY.current === null) return;
-            var dy = e.nativeEvent.changedTouches[0].pageY - touchStartY.current;
-            touchStartY.current = null;
-            if (dy < -80) void TrackPlayer.skipToNext().catch(() => undefined);
-            else if (dy > 80) void TrackPlayer.skipToPrevious().catch(() => undefined);
-          }}
-        >
-          <View style={styles.playerTopBg} />
-          <Animated.View style={[styles.playerAura, { opacity: 0.35 }]} />
-          <View style={styles.playerHeadRow}>
-            <TouchableOpacity onPress={() => setPlayerOpen(false)}><Text style={styles.playerCloseText}>∨ 收起</Text></TouchableOpacity>
-            <TouchableOpacity onPress={() => setLyricFocus(v => !v)}>
-              <Text style={styles.playerModeText}>{lyricFocus ? '♫ 唱片' : '≡ 歌词'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setLyricStage(s => LYRIC_STAGES[(LYRIC_STAGES.indexOf(s) + 1) % LYRIC_STAGES.length])}>
-              <Text style={styles.playerModeText}>舞台 {LYRIC_STAGE_LABELS[lyricStage]}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setVinylMode(v => !v)}>
-              <Text style={styles.playerModeText}>{vinylMode ? '◉ 唱片' : '□ 简约'}</Text>
-            </TouchableOpacity>
-          </View>
-          <Animated.View style={[styles.lyricRail, {
-            opacity: lyricAnim,
-            transform: [{ translateX: lyricAnim.interpolate({ inputRange: [0, 1], outputRange: [24, 0] }) }]
-          }]}>
-            <TouchableOpacity style={styles.lyricRailBtn} onPress={() => setLyricFocus(true)}><Text style={styles.lyricRailText}>词</Text></TouchableOpacity>
-            <TouchableOpacity style={styles.lyricRailBtn} onPress={() => setLyricFocus(true)}><Text style={styles.lyricRailText}>译</Text></TouchableOpacity>
-            <TouchableOpacity style={styles.lyricRailBtn} onPress={() => setLyricFocus(false)}><Text style={styles.lyricRailText}>大</Text></TouchableOpacity>
-          </Animated.View>
-          {currentTrack && (
-            <>
-              <TouchableOpacity activeOpacity={0.9} onPress={() => setLyricFocus(v => !v)}>
-                <Animated.View style={[styles.playerCoverWrap, {
-                  transform: [
-                    { rotate: spinAngle },
-                    { translateX: lyricAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 108] }) },
-                    { translateY: lyricAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -180] }) },
-                    { scale: lyricAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0.22] }) }
-                  ]
+      {/* 全屏播放页：一镜到底 morph + 歌词占满全屏；下滑收起/回弹 */}
+      <Modal visible={playerOpen} transparent animationType="none" statusBarTranslucent onRequestClose={closePlayer}>
+        <Animated.View style={[styles.playerSheet, {
+          backgroundColor: themeBg,
+          opacity: sheetOpacity,
+          transform: [{ translateY: sheetTranslateY }]
+        }]}>
+          <View
+            style={styles.playerScreen}
+            onTouchStart={e => onSheetTouchStart(e.nativeEvent.pageY)}
+            onTouchMove={e => onSheetTouchMove(e.nativeEvent.pageY)}
+            onTouchEnd={onSheetTouchEnd}
+          >
+            <View style={styles.sheetGrabber} />
+            <View style={[styles.playerTopBg, { backgroundColor: themeBg }]} />
+            <Animated.View style={[styles.playerAura, { opacity: 0.28 }]} />
+            <View style={styles.playerHeadRow}>
+              <TouchableOpacity onPress={closePlayer} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Text style={[styles.playerCloseText, psStyle]}>∨ 收起</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setLyricFocus(v => !v)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Text style={[styles.playerModeText, psStyle]}>{lyricFocus ? '◉ 唱片' : '≡ 歌词'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setLyricStage(s => LYRIC_STAGES[(LYRIC_STAGES.indexOf(s) + 1) % LYRIC_STAGES.length])} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Text style={[styles.playerModeText, psStyle]}>舞台 {LYRIC_STAGE_LABELS[lyricStage]}</Text>
+              </TouchableOpacity>
+              {!lyricFocus && (
+                <TouchableOpacity onPress={() => setVinylMode(v => !v)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                  <Text style={[styles.playerModeText, psStyle]}>{vinylMode ? '◉ 黑胶' : '□ 方形'}</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+            {currentTrack && (
+              <>
+                {/* 封面：歌词模式收起为 0 高，把整屏让给歌词；morph 负责从迷你条放大 */}
+                <Animated.View style={[styles.playerCoverSlot, {
+                  height: lyricAnim.interpolate({ inputRange: [0, 1], outputRange: [coverSize + 16, 0], extrapolate: 'clamp' }),
+                  opacity: lyricAnim.interpolate({ inputRange: [0, 0.6], outputRange: [1, 0], extrapolate: 'clamp' })
                 }]}>
-                  {currentTrack.cover ? (
-                    <Image source={{ uri: currentTrack.cover }} style={[styles.playerCover, vinylMode && styles.playerCoverRound]} />
-                  ) : (
-                    <View style={[styles.playerCover, styles.playerCoverPh, vinylMode && styles.playerCoverRound]}><Text style={styles.playerCoverPhText}>♪</Text></View>
-                  )}
-                  {vinylMode && <View style={styles.vinylHole} />}
+                  <TouchableOpacity activeOpacity={0.9} onPress={() => setLyricFocus(true)}>
+                    <Animated.View style={[styles.playerCoverWrap, {
+                      width: coverSize, height: coverSize, borderRadius: coverSize / 2,
+                      transform: [{ rotate: spinAngle }, { translateY: coverY }, { scale: coverScale }]
+                    }]}>
+                      {currentTrack.cover ? (
+                        <Image source={{ uri: currentTrack.cover }} style={[styles.playerCover, {
+                          width: coverSize - 28, height: coverSize - 28,
+                          borderRadius: vinylMode ? (coverSize - 28) / 2 : 8
+                        }]} />
+                      ) : (
+                        <View style={[styles.playerCover, styles.playerCoverPh, {
+                          width: coverSize - 28, height: coverSize - 28,
+                          borderRadius: vinylMode ? (coverSize - 28) / 2 : 8
+                        }]}><Text style={styles.playerCoverPhText}>♪</Text></View>
+                      )}
+                      {vinylMode && <View style={styles.vinylHole} />}
+                    </Animated.View>
+                  </TouchableOpacity>
                 </Animated.View>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.playerMetaBox} activeOpacity={0.9} onPress={() => setLyricFocus(v => !v)}>
-                <Text style={styles.playerTitle}>{currentTrack.title}</Text>
-                <Text style={styles.playerArtist}>{currentTrack.artist}{currentTrack.year ? ' · ' + currentTrack.year : ''}</Text>
-              </TouchableOpacity>
-              <View style={styles.lyricBox}>
-                <ScrollView ref={lyricScrollRef} contentContainerStyle={styles.lyricContent}>
-                  {lyrics.length ? lyrics.map((l, i) => (
-                    <Text key={i} style={[styles.lyricLine, lyricFocus && styles.lyricLineList, i === currentLyricIdx && styles.lyricLineOn, i === currentLyricIdx && lyricFocus && styles.lyricLineListOn, lyricStage === 'hand' && styles.lyricHand, lyricStage === 'caption' && styles.lyricCaption, lyricStage === 'dialogue' && styles.lyricDialogue, lyricStage === 'dialogue' && i % 2 === 1 && styles.lyricDialogueAlt]}>{l.text}</Text>
-                  )) : <Text style={styles.lyricEmpty}>暂无歌词</Text>}
-                </ScrollView>
-              </View>
-              <View style={styles.seekRow}>
-                <Text style={styles.timeText}>{fmtTime(position)}</Text>
-                <TouchableOpacity style={styles.seekBar} onPress={e => {
-                  const x = e.nativeEvent.locationX;
-                  seekTo((x / width) * (duration || 0)).catch(() => undefined);
-                }}>
-                  <View style={[styles.seekFill, { width: `${duration ? (position / duration) * 100 : 0}%` }]} />
+                <TouchableOpacity style={styles.playerMetaBox} activeOpacity={0.9} onPress={() => setLyricFocus(v => !v)}>
+                  <Text style={[styles.playerTitle, pfStyle]}>{currentTrack.title}</Text>
+                  <Text style={[styles.playerArtist, psStyle]}>{currentTrack.artist}{currentTrack.year ? ' · ' + currentTrack.year : ''}</Text>
                 </TouchableOpacity>
-                <Text style={styles.timeText}>{fmtTime(duration)}</Text>
-              </View>
-              <View style={styles.playerControls}>
-                <TouchableOpacity style={styles.ctrlBtn} onPress={() => playRelative(-1)}>
-                  <Text style={styles.ctrlSide}>◀◀</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.bigPlay} activeOpacity={0.8} onPress={() => void togglePlayPause()}>
-                  <Text style={styles.bigPlayText}>{isPlaying ? '❚❚' : '▶'}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.ctrlBtn} onPress={() => playRelative(1)}>
-                  <Text style={styles.ctrlSide}>▶▶</Text>
-                </TouchableOpacity>
-              </View>
-              <View style={styles.playerActions}>
-                <TouchableOpacity style={styles.actionBtn} onPress={() => toggleFav(currentTrack)}>
-                  <Text style={[styles.actionIcon, favorites.includes(currentTrack.key) && styles.heartOn]}>{favorites.includes(currentTrack.key) ? '♥' : '♡'}</Text>
-                  <Text style={styles.actionLabel}>喜欢</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.actionBtn} onPress={() => toggleCollect(currentTrack)}>
-                  <Text style={[styles.actionIcon, collected.some(t => t.key === currentTrack.key) && styles.starOn]}>★</Text>
-                  <Text style={styles.actionLabel}>收藏</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.actionBtn} onPress={() => setDetailTrack(currentTrack)}>
-                  <Text style={styles.actionIcon}>ⓘ</Text><Text style={styles.actionLabel}>音源</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.actionBtn} onPress={() => setPlayerOpen(false)}>
-                  <Text style={styles.actionIcon}>☰</Text><Text style={styles.actionLabel}>队列</Text>
-                </TouchableOpacity>
-              </View>
-            </>
-          )}
-        </View>
+                <View style={[styles.lyricBox, lyricFocus && styles.lyricBoxFull]}>
+                  <ScrollView ref={lyricScrollRef} showsVerticalScrollIndicator={false}
+                    contentContainerStyle={[styles.lyricContent, { paddingVertical: lyricFocus ? lyricPad : 24 }]}>
+                    {lyrics.length ? lyrics.map((l, i) => (
+                      <Text key={i} style={[styles.lyricLine, psStyle, lyricFocus && styles.lyricLineList, i === currentLyricIdx && styles.lyricLineOn, i === currentLyricIdx && lyricFocus && styles.lyricLineListOn, i === currentLyricIdx && { color: COLORS.accent }, lyricStage === 'hand' && styles.lyricHand, lyricStage === 'caption' && styles.lyricCaption, lyricStage === 'dialogue' && styles.lyricDialogue, lyricStage === 'dialogue' && i % 2 === 1 && styles.lyricDialogueAlt]}>{l.text}</Text>
+                    )) : <Text style={[styles.lyricEmpty, psStyle]}>暂无歌词</Text>}
+                  </ScrollView>
+                </View>
+                <View style={styles.seekRow}>
+                  <Text style={[styles.timeText, psStyle]}>{fmtTime(position)}</Text>
+                  <TouchableOpacity style={[styles.seekBar, { backgroundColor: ctrlBg }]} hitSlop={{ top: 12, bottom: 12 }}
+                    onLayout={e => { seekWidth.current = e.nativeEvent.layout.width; }}
+                    onPress={e => {
+                      const ratio = Math.max(0, Math.min(1, e.nativeEvent.locationX / (seekWidth.current || 1)));
+                      seekTo(ratio * (duration || 0)).catch(() => undefined);
+                    }}>
+                    <View style={[styles.seekFill, { width: `${duration ? (position / duration) * 100 : 0}%` }]} />
+                  </TouchableOpacity>
+                  <Text style={[styles.timeText, psStyle]}>{fmtTime(duration)}</Text>
+                </View>
+                <View style={styles.playerControls}>
+                  <TouchableOpacity style={[styles.ctrlBtn, { backgroundColor: ctrlBg }]} onPress={() => playRelative(-1)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <Text style={[styles.ctrlSide, psStyle]}>◀◀</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.bigPlay} activeOpacity={0.8} onPress={() => void togglePlayPause()}>
+                    <Text style={styles.bigPlayText}>{isPlaying ? '❚❚' : '▶'}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.ctrlBtn, { backgroundColor: ctrlBg }]} onPress={() => playRelative(1)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <Text style={[styles.ctrlSide, psStyle]}>▶▶</Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.playerActions}>
+                  <TouchableOpacity style={styles.actionBtn} onPress={() => toggleFav(currentTrack)}>
+                    <Text style={[styles.actionIcon, favorites.includes(currentTrack.key) && styles.heartOn]}>{favorites.includes(currentTrack.key) ? '♥' : '♡'}</Text>
+                    <Text style={[styles.actionLabel, psStyle]}>喜欢</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.actionBtn} onPress={() => toggleCollect(currentTrack)}>
+                    <Text style={[styles.actionIcon, collected.some(t => t.key === currentTrack.key) && styles.starOn]}>★</Text>
+                    <Text style={[styles.actionLabel, psStyle]}>收藏</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.actionBtn} onPress={() => setDetailTrack(currentTrack)}>
+                    <Text style={[styles.actionIcon, psStyle]}>ⓘ</Text><Text style={[styles.actionLabel, psStyle]}>音源</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+          </View>
+        </Animated.View>
       </Modal>
 
       {/* 歌单命名 / 链接输入 */}
@@ -1256,7 +1349,8 @@ const styles = StyleSheet.create({
   friendCode: { color: COLORS.sub, fontSize: 11 },
   queueItem: { color: COLORS.sub, fontSize: 12, paddingVertical: 4 },
   aboutTitle: { color: COLORS.text, fontSize: 14, fontWeight: '700' },
-  miniPlayer: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.panel2, marginHorizontal: 8, marginBottom: 4, borderRadius: 10, padding: 8, gap: 10 },
+  miniPlayer: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.panel2, marginHorizontal: 8, marginBottom: 4, borderRadius: 10, padding: 8, gap: 6 },
+  miniMain: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: 10, minWidth: 0 },
   miniCover: { width: 40, height: 40, borderRadius: 6 },
   miniInfo: { flex: 1 },
   miniTitle: { color: COLORS.text, fontSize: 13, fontWeight: '700' },
@@ -1311,11 +1405,11 @@ const styles = StyleSheet.create({
   tabIconOn: { color: COLORS.accent },
   tabLabel: { color: COLORS.sub, fontSize: 10.5, marginTop: 2 },
   tabLabelOn: { color: COLORS.accent },
-  playerScreen: { flex: 1, backgroundColor: '#f2f5f7', paddingHorizontal: 20, paddingTop: 50 },
-  playerTopBg: { position: 'absolute', left: 0, right: 0, top: 0, height: 300, backgroundColor: '#e3f5f3' },
-  lyricRail: { position: 'absolute', right: 12, top: '34%', zIndex: 10 },
-  lyricRailBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: 'rgba(255,107,154,.25)', borderWidth: 1, borderColor: 'rgba(255,255,255,.18)', justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
-  lyricRailText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  playerSheet: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  playerScreen: { flex: 1, paddingHorizontal: 20, paddingTop: 52, paddingBottom: 26 },
+  sheetGrabber: { alignSelf: 'center', width: 42, height: 4, borderRadius: 2, backgroundColor: 'rgba(120,130,150,.45)', marginBottom: 10 },
+  playerTopBg: { position: 'absolute', left: 0, right: 0, top: 0, height: 320 },
+  playerCoverSlot: { alignSelf: 'center', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
   lyricHand: { fontFamily: 'serif', color: '#ff7aa8', fontSize: 20, transform: [{ rotate: '-2deg' }] },
   lyricCaption: { alignSelf: 'center', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: '#8a8f9c' },
   lyricDialogue: { alignSelf: 'flex-start', maxWidth: '76%', textAlign: 'left', paddingHorizontal: 12, paddingVertical: 7, borderRadius: 14, backgroundColor: 'rgba(255,255,255,.18)' },
@@ -1326,8 +1420,9 @@ const styles = StyleSheet.create({
   playerCloseText: { color: '#4b6561', fontSize: 15 },
   playerTitle: { color: '#173c3a', fontSize: 22, fontWeight: '800', textAlign: 'center' },
   playerArtist: { color: '#63807c', fontSize: 14, textAlign: 'center', marginTop: 6 },
-  lyricBox: { flex: 1, marginVertical: 20 },
-  lyricContent: { paddingVertical: 110 },
+  lyricBox: { flex: 1, minHeight: 0, marginVertical: 12 },
+  lyricBoxFull: { flexGrow: 1, flexShrink: 1, marginVertical: 4 },
+  lyricContent: { paddingVertical: 24 },
   lyricLine: { color: COLORS.sub, fontSize: 15, textAlign: 'center', paddingVertical: 8 },
   lyricLineOn: { color: COLORS.accent, fontSize: 18, fontWeight: '700' },
   lyricEmpty: { color: COLORS.sub, textAlign: 'center', marginTop: 40 },

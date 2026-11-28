@@ -44,6 +44,8 @@ const SHELF = [
 ];
 
 const GUESS = ['周杰伦', '晴天', '邓紫棋', 'Taylor Swift', 'lo-fi 纯音乐', '轻音乐'];
+const LYRIC_STAGES = ['fashion', 'hand', 'caption', 'dialogue'] as const;
+const LYRIC_STAGE_LABELS: Record<string, string> = { fashion: '时尚', hand: '手书', caption: '字幕', dialogue: '对话' };
 
 /* 26 套配色，来自 KB Chat 背景样式参考库；渐变取主色作为原生端底色 */
 const NATIVE_THEMES = [
@@ -61,7 +63,7 @@ const NATIVE_THEMES = [
   { id:'nightglow', n:'深夜暖光', bg:'#241c22', fg:'#e6d9d5' }, { id:'glasslight', n:'磨砂浅色', bg:'#f3eaff', fg:'#332f42' },
   { id:'glassdark', n:'磨砂深色', bg:'#2a2340', fg:'#e2dcea' }, { id:'grain', n:'柔光颗粒', bg:'#f6f3ef', fg:'#3a3532' }
 ];
-const NATIVE_VERSION = 15;
+const NATIVE_VERSION = 16;
 const APK_URL = 'https://kaobei-music.pages.dev/api/apk';
 
 const COLORS = {
@@ -122,6 +124,8 @@ function App(): React.JSX.Element {
   const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
   const [playerOpen, setPlayerOpen] = useState(false);
   const [lyricFocus, setLyricFocus] = useState(false);
+  const [lyricStage, setLyricStage] = useState<(typeof LYRIC_STAGES)[number]>('fashion');
+  const touchStartY = useRef<number | null>(null);
   const [voiceAwake, setVoiceAwake] = useState(false);
   const [voiceText, setVoiceText] = useState('');
   const [voiceInputOpen, setVoiceInputOpen] = useState(false);
@@ -993,13 +997,26 @@ function App(): React.JSX.Element {
 
       {/* 全屏播放页 - 酷狗概念版风格 */}
       <Modal visible={playerOpen} animationType="slide" onRequestClose={() => setPlayerOpen(false)}>
-        <View style={[styles.playerScreen, { backgroundColor: themeBg }]}>
+        <View
+          style={[styles.playerScreen, { backgroundColor: themeBg }]}
+          onTouchStart={e => { touchStartY.current = e.nativeEvent.touches[0].pageY; }}
+          onTouchEnd={e => {
+            if (touchStartY.current === null) return;
+            var dy = e.nativeEvent.changedTouches[0].pageY - touchStartY.current;
+            touchStartY.current = null;
+            if (dy < -80) void TrackPlayer.skipToNext().catch(() => undefined);
+            else if (dy > 80) void TrackPlayer.skipToPrevious().catch(() => undefined);
+          }}
+        >
           <View style={styles.playerTopBg} />
           <Animated.View style={[styles.playerAura, { opacity: 0.35 }]} />
           <View style={styles.playerHeadRow}>
             <TouchableOpacity onPress={() => setPlayerOpen(false)}><Text style={styles.playerCloseText}>∨ 收起</Text></TouchableOpacity>
             <TouchableOpacity onPress={() => setLyricFocus(v => !v)}>
               <Text style={styles.playerModeText}>{lyricFocus ? '♫ 唱片' : '≡ 歌词'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setLyricStage(s => LYRIC_STAGES[(LYRIC_STAGES.indexOf(s) + 1) % LYRIC_STAGES.length])}>
+              <Text style={styles.playerModeText}>舞台 {LYRIC_STAGE_LABELS[lyricStage]}</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => setVinylMode(v => !v)}>
               <Text style={styles.playerModeText}>{vinylMode ? '◉ 唱片' : '□ 简约'}</Text>
@@ -1039,7 +1056,7 @@ function App(): React.JSX.Element {
               <View style={styles.lyricBox}>
                 <ScrollView ref={lyricScrollRef} contentContainerStyle={styles.lyricContent}>
                   {lyrics.length ? lyrics.map((l, i) => (
-                    <Text key={i} style={[styles.lyricLine, lyricFocus && styles.lyricLineList, i === currentLyricIdx && styles.lyricLineOn, i === currentLyricIdx && lyricFocus && styles.lyricLineListOn]}>{l.text}</Text>
+                    <Text key={i} style={[styles.lyricLine, lyricFocus && styles.lyricLineList, i === currentLyricIdx && styles.lyricLineOn, i === currentLyricIdx && lyricFocus && styles.lyricLineListOn, lyricStage === 'hand' && styles.lyricHand, lyricStage === 'caption' && styles.lyricCaption, lyricStage === 'dialogue' && styles.lyricDialogue, lyricStage === 'dialogue' && i % 2 === 1 && styles.lyricDialogueAlt]}>{l.text}</Text>
                   )) : <Text style={styles.lyricEmpty}>暂无歌词</Text>}
                 </ScrollView>
               </View>
@@ -1265,6 +1282,10 @@ const styles = StyleSheet.create({
   lyricRail: { position: 'absolute', right: 12, top: '34%', zIndex: 10 },
   lyricRailBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: 'rgba(255,107,154,.25)', borderWidth: 1, borderColor: 'rgba(255,255,255,.18)', justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
   lyricRailText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  lyricHand: { fontFamily: 'serif', color: '#ff7aa8', fontSize: 20, transform: [{ rotate: '-2deg' }] },
+  lyricCaption: { alignSelf: 'center', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: '#8a8f9c' },
+  lyricDialogue: { alignSelf: 'flex-start', maxWidth: '76%', textAlign: 'left', paddingHorizontal: 12, paddingVertical: 7, borderRadius: 14, backgroundColor: 'rgba(255,255,255,.18)' },
+  lyricDialogueAlt: { alignSelf: 'flex-end', backgroundColor: 'rgba(7,193,96,.28)' },
   lyricLineList: { fontSize: 15, lineHeight: 30, opacity: 0.55 },
   lyricLineListOn: { fontSize: 19, lineHeight: 34, opacity: 1, color: '#fff' },
   playerClose: { alignSelf: 'flex-start', marginBottom: 30 },

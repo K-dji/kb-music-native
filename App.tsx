@@ -52,7 +52,7 @@ const COLORS = {
   border: '#252c3a',
   text: '#e8ecf4',
   sub: '#8b95a9',
-  accent: '#ff6b9a',
+  accent: '#00bfa5',
   accent2: '#7c5cff'
 };
 
@@ -1143,9 +1143,9 @@ const styles = StyleSheet.create({
   miniArtist: { color: COLORS.sub, fontSize: 11 },
   miniPlay: { padding: 8 },
   miniPlayText: { color: COLORS.accent, fontSize: 18 },
-  mineFace: { width: 30, height: 30, borderRadius: 15, borderWidth: 2, borderColor: '#ff6b9a', position: 'relative', marginBottom: 2 },
-  mineEye: { position: 'absolute', left: 8, top: 10, width: 4, height: 4, borderRadius: 2, backgroundColor: '#ff6b9a' },
-  mineSmile: { position: 'absolute', left: 8, top: 14, width: 14, height: 9, borderBottomWidth: 2, borderBottomColor: '#ff6b9a', borderTopLeftRadius: 2, borderTopRightRadius: 2, borderBottomLeftRadius: 9, borderBottomRightRadius: 9 },
+  mineFace: { width: 30, height: 30, borderRadius: 15, borderWidth: 2, borderColor: '#00bfa5', position: 'relative', marginBottom: 2 },
+  mineEye: { position: 'absolute', left: 8, top: 10, width: 4, height: 4, borderRadius: 2, backgroundColor: '#00bfa5' },
+  mineSmile: { position: 'absolute', left: 8, top: 14, width: 14, height: 9, borderBottomWidth: 2, borderBottomColor: '#00bfa5', borderTopLeftRadius: 2, borderTopRightRadius: 2, borderBottomLeftRadius: 9, borderBottomRightRadius: 9 },
   tabBar: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: COLORS.border, paddingVertical: 8 },
   tabItem: { flex: 1, alignItems: 'center' },
   tabIcon: { fontSize: 20, color: COLORS.sub },
@@ -1153,7 +1153,7 @@ const styles = StyleSheet.create({
   tabLabel: { color: COLORS.sub, fontSize: 11, marginTop: 2 },
   tabLabelOn: { color: COLORS.accent },
   playerScreen: { flex: 1, backgroundColor: '#0b1220', paddingHorizontal: 20, paddingTop: 50 },
-  playerTopBg: { position: 'absolute', left: 0, right: 0, top: 0, height: 300, backgroundColor: '#8a3b60' },
+  playerTopBg: { position: 'absolute', left: 0, right: 0, top: 0, height: 300, backgroundColor: '#0b6e63' },
   lyricRail: { position: 'absolute', right: 12, top: '34%', zIndex: 10 },
   lyricRailBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: 'rgba(255,107,154,.25)', borderWidth: 1, borderColor: 'rgba(255,255,255,.18)', justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
   lyricRailText: { color: '#fff', fontSize: 12, fontWeight: '700' },

@@ -61,7 +61,7 @@ const NATIVE_THEMES = [
   { id:'nightglow', n:'深夜暖光', bg:'#241c22', fg:'#e6d9d5' }, { id:'glasslight', n:'磨砂浅色', bg:'#f3eaff', fg:'#332f42' },
   { id:'glassdark', n:'磨砂深色', bg:'#2a2340', fg:'#e2dcea' }, { id:'grain', n:'柔光颗粒', bg:'#f6f3ef', fg:'#3a3532' }
 ];
-const NATIVE_VERSION = 14;
+const NATIVE_VERSION = 15;
 const APK_URL = 'https://kaobei-music.pages.dev/api/apk';
 
 const COLORS = {
@@ -102,8 +102,9 @@ function App(): React.JSX.Element {
   const [searching, setSearching] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [cfg, setCfg] = useState<AppConfig>(DEFAULT_CONFIG);
-  const [themeId, setThemeId] = useState('clean');
+  const [themeId, setThemeId] = useState('default');
   const activeTheme = NATIVE_THEMES.find(t => t.id === themeId) || NATIVE_THEMES[0];
+  const themeBg = themeId === 'default' ? COLORS.bg : activeTheme.bg;
   const [profile, setProfile] = useState<Profile | null>(null);
   const [favorites, setFavorites] = useState<string[]>([]);
   const [favoriteTracks, setFavoriteTracks] = useState<Track[]>([]);
@@ -187,7 +188,8 @@ function App(): React.JSX.Element {
       setCollected(col); setRecent(rec); setPlaylists(pls); setQueueKeys(q);
       setNickInput(p.nickname);
       const savedTheme = await AsyncStorage.getItem('kb-color-theme').catch(() => null);
-      if (savedTheme && NATIVE_THEMES.some(t => t.id === savedTheme)) setThemeId(savedTheme);
+      if (savedTheme === 'default') setThemeId('default');
+      else if (savedTheme && NATIVE_THEMES.some(t => t.id === savedTheme)) setThemeId(savedTheme);
     })();
     return () => { alive = false; };
   }, []);
@@ -628,7 +630,7 @@ function App(): React.JSX.Element {
   };
 
   return (
-    <View style={[styles.root, { backgroundColor: activeTheme.bg }]}>
+    <View style={[styles.root, { backgroundColor: themeBg }]}>
       {/* 顶部品牌栏 */}
       <View style={styles.header}>
         <Image source={require('./assets/logo.png')} style={styles.logo} />
@@ -917,6 +919,12 @@ function App(): React.JSX.Element {
               <Text style={styles.settingName}>界面配色（26 套）</Text>
               <Text style={styles.settingDesc}>来自 KB Chat 配色参考库，切换后立即生效并保存。</Text>
               <View style={styles.themeGrid}>
+                <TouchableOpacity
+                  style={[styles.themeChip, { backgroundColor: COLORS.bg, borderColor: themeId === 'default' ? COLORS.accent : COLORS.border }]}
+                  onPress={() => { setThemeId('default'); void AsyncStorage.setItem('kb-color-theme', 'default').catch(() => undefined); }}
+                >
+                  <Text style={[styles.themeChipText, { color: COLORS.text }]}>默认（原配色）</Text>
+                </TouchableOpacity>
                 {NATIVE_THEMES.map(t => (
                   <TouchableOpacity
                     key={t.id}
@@ -985,7 +993,7 @@ function App(): React.JSX.Element {
 
       {/* 全屏播放页 - 酷狗概念版风格 */}
       <Modal visible={playerOpen} animationType="slide" onRequestClose={() => setPlayerOpen(false)}>
-        <View style={[styles.playerScreen, { backgroundColor: activeTheme.bg }]}>
+        <View style={[styles.playerScreen, { backgroundColor: themeBg }]}>
           <View style={styles.playerTopBg} />
           <Animated.View style={[styles.playerAura, { opacity: 0.35 }]} />
           <View style={styles.playerHeadRow}>

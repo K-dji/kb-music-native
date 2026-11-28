@@ -1,6 +1,6 @@
 {
   "name": "kb-music-native",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "private": true,
   "description": "KB Music 原生版 - 多音源免费音乐聚合，TypeScript 严格类型",
   "scripts": {

@@ -43,7 +43,7 @@ const SHELF = [
 ];
 
 const GUESS = ['周杰伦', '晴天', '邓紫棋', 'Taylor Swift', 'lo-fi 纯音乐', '轻音乐'];
-const NATIVE_VERSION = 12;
+const NATIVE_VERSION = 13;
 const APK_URL = 'https://kaobei-music.pages.dev/api/apk';
 
 const COLORS = {
@@ -936,7 +936,10 @@ function App(): React.JSX.Element {
                 <View style={styles.mineEye} />
                 <View style={[styles.mineEye, { left: 18 }]} />
                 <View style={styles.mineSmile} />
+                <View style={styles.mineBadge}><Text style={styles.mineBadgeText}>1</Text></View>
               </Animated.View>
+            ) : id === 'search' ? (
+              <Image source={require('./assets/logo.png')} style={[styles.tabPhoto, tab === id && styles.tabPhotoOn]} />
             ) : (
               <Text style={[styles.tabIcon, tab === id && styles.tabIconOn]}>{icon}</Text>
             )}
@@ -1189,15 +1192,19 @@ const styles = StyleSheet.create({
   miniArtist: { color: COLORS.sub, fontSize: 11 },
   miniPlay: { padding: 8 },
   miniPlayText: { color: COLORS.accent, fontSize: 18 },
-  mineHeader: { alignItems: 'center', padding: 18, borderRadius: 20, backgroundColor: '#143b3b', marginBottom: 14 },
+  mineHeader: { alignItems: 'center', padding: 18, borderRadius: 20, backgroundColor: '#dff8f5', marginBottom: 14 },
   mineAvatar: { width: 78, height: 78, borderRadius: 39, marginBottom: 10 },
-  mineName: { color: '#fff', fontSize: 18, fontWeight: '800' },
-  mineSub: { color: '#9fd8d0', fontSize: 11, marginTop: 4 },
+  mineName: { color: '#173c3a', fontSize: 18, fontWeight: '800' },
+  mineSub: { color: '#4b7a75', fontSize: 11, marginTop: 4 },
   mineStats: { flexDirection: 'row', gap: 18, marginTop: 12 },
-  mineStat: { color: '#d6fffa', fontSize: 12 },
+  mineStat: { color: '#173c3a', fontSize: 12 },
   mineTiles: { flexDirection: 'row', gap: 8, marginTop: 14 },
-  mineTile: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 12, backgroundColor: 'rgba(255,255,255,.09)' },
-  mineTileText: { color: '#eafffb', fontSize: 11 },
+  mineTile: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 12, backgroundColor: 'rgba(255,255,255,.75)' },
+  mineTileText: { color: '#173c3a', fontSize: 11 },
+  tabPhoto: { width: 30, height: 30, borderRadius: 15, marginBottom: 2 },
+  tabPhotoOn: { borderWidth: 2, borderColor: '#00bfa5' },
+  mineBadge: { position: 'absolute', right: -5, top: -5, minWidth: 15, height: 15, borderRadius: 8, backgroundColor: '#ff3b30', justifyContent: 'center', alignItems: 'center' },
+  mineBadgeText: { color: '#fff', fontSize: 9, fontWeight: '700' },
   mineFace: { width: 30, height: 30, borderRadius: 15, borderWidth: 2, borderColor: '#00bfa5', position: 'relative', marginBottom: 2 },
   mineEye: { position: 'absolute', left: 8, top: 10, width: 4, height: 4, borderRadius: 2, backgroundColor: '#00bfa5' },
   mineSmile: { position: 'absolute', left: 8, top: 14, width: 14, height: 9, borderBottomWidth: 2, borderBottomColor: '#00bfa5', borderTopLeftRadius: 2, borderTopRightRadius: 2, borderBottomLeftRadius: 9, borderBottomRightRadius: 9 },
@@ -1207,24 +1214,24 @@ const styles = StyleSheet.create({
   tabIconOn: { color: COLORS.accent },
   tabLabel: { color: COLORS.sub, fontSize: 11, marginTop: 2 },
   tabLabelOn: { color: COLORS.accent },
-  playerScreen: { flex: 1, backgroundColor: '#0b1220', paddingHorizontal: 20, paddingTop: 50 },
-  playerTopBg: { position: 'absolute', left: 0, right: 0, top: 0, height: 300, backgroundColor: '#0b6e63' },
+  playerScreen: { flex: 1, backgroundColor: '#f2f5f7', paddingHorizontal: 20, paddingTop: 50 },
+  playerTopBg: { position: 'absolute', left: 0, right: 0, top: 0, height: 300, backgroundColor: '#e3f5f3' },
   lyricRail: { position: 'absolute', right: 12, top: '34%', zIndex: 10 },
   lyricRailBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: 'rgba(255,107,154,.25)', borderWidth: 1, borderColor: 'rgba(255,255,255,.18)', justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
   lyricRailText: { color: '#fff', fontSize: 12, fontWeight: '700' },
   lyricLineList: { fontSize: 15, lineHeight: 30, opacity: 0.55 },
   lyricLineListOn: { fontSize: 19, lineHeight: 34, opacity: 1, color: '#fff' },
   playerClose: { alignSelf: 'flex-start', marginBottom: 30 },
-  playerCloseText: { color: COLORS.sub, fontSize: 15 },
-  playerTitle: { color: COLORS.text, fontSize: 22, fontWeight: '800', textAlign: 'center' },
-  playerArtist: { color: COLORS.sub, fontSize: 14, textAlign: 'center', marginTop: 6 },
+  playerCloseText: { color: '#4b6561', fontSize: 15 },
+  playerTitle: { color: '#173c3a', fontSize: 22, fontWeight: '800', textAlign: 'center' },
+  playerArtist: { color: '#63807c', fontSize: 14, textAlign: 'center', marginTop: 6 },
   lyricBox: { flex: 1, marginVertical: 20 },
   lyricContent: { paddingVertical: 110 },
   lyricLine: { color: COLORS.sub, fontSize: 15, textAlign: 'center', paddingVertical: 8 },
   lyricLineOn: { color: COLORS.accent, fontSize: 18, fontWeight: '700' },
   lyricEmpty: { color: COLORS.sub, textAlign: 'center', marginTop: 40 },
   seekRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  timeText: { color: COLORS.sub, fontSize: 11, width: 38 },
+  timeText: { color: '#4b6561', fontSize: 11, width: 38 },
   seekBar: { flex: 1, height: 4, backgroundColor: COLORS.panel2, borderRadius: 2 },
   seekFill: { height: 4, backgroundColor: COLORS.accent, borderRadius: 2 },
   bigPlay: { alignSelf: 'center', width: 70, height: 70, borderRadius: 35, backgroundColor: COLORS.accent, justifyContent: 'center', alignItems: 'center', marginVertical: 24 },
@@ -1240,7 +1247,7 @@ const styles = StyleSheet.create({
   // 酷狗概念版风格播放页
   playerAura: { position: 'absolute', top: -60, left: -40, right: -40, height: 320, borderRadius: 160, backgroundColor: COLORS.accent },
   playerHeadRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12 },
-  playerModeText: { color: COLORS.sub, fontSize: 12 },
+  playerModeText: { color: '#4b6561', fontSize: 12 },
   playerCoverWrap: { width: 260, height: 260, alignSelf: 'center', marginTop: 8, marginBottom: 18, justifyContent: 'center', alignItems: 'center', borderRadius: 130, borderWidth: 6, borderColor: '#12121e' },
   playerCover: { width: 232, height: 232 },
   playerCoverRound: { borderRadius: 116 },
@@ -1250,7 +1257,7 @@ const styles = StyleSheet.create({
   playerMetaBox: { alignItems: 'center', marginBottom: 14 },
   playerControls: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 36, marginTop: 16 },
   ctrlBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: COLORS.panel2, justifyContent: 'center', alignItems: 'center' },
-  ctrlSide: { color: COLORS.sub, fontSize: 18 },
+  ctrlSide: { color: '#4b6561', fontSize: 18 },
   playerActions: { flexDirection: 'row', justifyContent: 'space-around', marginTop: 20, paddingTop: 16, borderTopWidth: 1, borderTopColor: COLORS.border },
   actionBtn: { alignItems: 'center', gap: 4 },
   actionIcon: { color: COLORS.sub, fontSize: 22 },

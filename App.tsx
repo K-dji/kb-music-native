@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   ActivityIndicator,
   Alert,
@@ -43,7 +44,24 @@ const SHELF = [
 ];
 
 const GUESS = ['周杰伦', '晴天', '邓紫棋', 'Taylor Swift', 'lo-fi 纯音乐', '轻音乐'];
-const NATIVE_VERSION = 13;
+
+/* 26 套配色，来自 KB Chat 背景样式参考库；渐变取主色作为原生端底色 */
+const NATIVE_THEMES = [
+  { id:'clean', n:'纯净白', bg:'#ffffff', fg:'#1c1c1e' }, { id:'cream', n:'暖奶油', bg:'#fdf8f0', fg:'#3a3228' },
+  { id:'paper', n:'纸张色', bg:'#f5f2eb', fg:'#33302a' }, { id:'mint', n:'薄荷清新', bg:'#eaf6f1', fg:'#24463c' },
+  { id:'sky', n:'天空蓝', bg:'#eaf3fb', fg:'#20384d' }, { id:'lavender', n:'柔和薰衣草', bg:'#f3eff8', fg:'#3d3350' },
+  { id:'rosepink', n:'玫瑰粉', bg:'#fceef1', fg:'#4d2f38' }, { id:'wechat', n:'经典深灰', bg:'#1e1e1e', fg:'#e6e6e6' },
+  { id:'navy', n:'深海军蓝', bg:'#191f28', fg:'#d6dae0' }, { id:'midnight', n:'午夜蓝', bg:'#1a1e2e', fg:'#d5d9e6' },
+  { id:'amoled', n:'纯黑 AMOLED', bg:'#000000', fg:'#e0e0e0' }, { id:'rosetnight', n:'墨夜玫瑰', bg:'#2a1f24', fg:'#eadde0' },
+  { id:'forest', n:'森林绿', bg:'#1b2620', fg:'#d4ded6' }, { id:'mistnight', n:'雾蓝深夜', bg:'#152232', fg:'#cdd8e6' },
+  { id:'dots', n:'圆点网格', bg:'#f7f8fa', fg:'#2c2f36' }, { id:'dotsdark', n:'暗夜星点', bg:'#191f28', fg:'#d6dae0' },
+  { id:'stripes', n:'斜纹布', bg:'#f2f6ef', fg:'#2e3a30' }, { id:'grid', n:'方格纸', bg:'#f7f9fc', fg:'#2b3442' },
+  { id:'sunrise', n:'晨曦暖橙', bg:'#fff4e8', fg:'#4a3329' }, { id:'aurora', n:'极光薄荷', bg:'#e8f7ef', fg:'#26453f' },
+  { id:'fogblue', n:'雾蓝海', bg:'#dbe9f5', fg:'#243b52' }, { id:'sagesky', n:'雨后青提', bg:'#eaf3e6', fg:'#2c443c' },
+  { id:'nightglow', n:'深夜暖光', bg:'#241c22', fg:'#e6d9d5' }, { id:'glasslight', n:'磨砂浅色', bg:'#f3eaff', fg:'#332f42' },
+  { id:'glassdark', n:'磨砂深色', bg:'#2a2340', fg:'#e2dcea' }, { id:'grain', n:'柔光颗粒', bg:'#f6f3ef', fg:'#3a3532' }
+];
+const NATIVE_VERSION = 14;
 const APK_URL = 'https://kaobei-music.pages.dev/api/apk';
 
 const COLORS = {
@@ -84,6 +102,8 @@ function App(): React.JSX.Element {
   const [searching, setSearching] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [cfg, setCfg] = useState<AppConfig>(DEFAULT_CONFIG);
+  const [themeId, setThemeId] = useState('clean');
+  const activeTheme = NATIVE_THEMES.find(t => t.id === themeId) || NATIVE_THEMES[0];
   const [profile, setProfile] = useState<Profile | null>(null);
   const [favorites, setFavorites] = useState<string[]>([]);
   const [favoriteTracks, setFavoriteTracks] = useState<Track[]>([]);
@@ -166,6 +186,8 @@ function App(): React.JSX.Element {
       setCfg(c); setProfile(p); setFavorites(fav); setFavoriteTracks(favTracks);
       setCollected(col); setRecent(rec); setPlaylists(pls); setQueueKeys(q);
       setNickInput(p.nickname);
+      const savedTheme = await AsyncStorage.getItem('kb-color-theme').catch(() => null);
+      if (savedTheme && NATIVE_THEMES.some(t => t.id === savedTheme)) setThemeId(savedTheme);
     })();
     return () => { alive = false; };
   }, []);
@@ -606,7 +628,7 @@ function App(): React.JSX.Element {
   };
 
   return (
-    <View style={styles.root}>
+    <View style={[styles.root, { backgroundColor: activeTheme.bg }]}>
       {/* 顶部品牌栏 */}
       <View style={styles.header}>
         <Image source={require('./assets/logo.png')} style={styles.logo} />
@@ -892,6 +914,19 @@ function App(): React.JSX.Element {
                   </View>
                 );
               })}
+              <Text style={styles.settingName}>界面配色（26 套）</Text>
+              <Text style={styles.settingDesc}>来自 KB Chat 配色参考库，切换后立即生效并保存。</Text>
+              <View style={styles.themeGrid}>
+                {NATIVE_THEMES.map(t => (
+                  <TouchableOpacity
+                    key={t.id}
+                    style={[styles.themeChip, { backgroundColor: t.bg, borderColor: t.id === themeId ? COLORS.accent : COLORS.border }]}
+                    onPress={() => { setThemeId(t.id); void AsyncStorage.setItem('kb-color-theme', t.id).catch(() => undefined); }}
+                  >
+                    <Text style={[styles.themeChipText, { color: t.fg }]}>{t.n}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
             </ScrollView>
             <TouchableOpacity style={styles.settingSave} onPress={() => { void Storage.saveConfig(cfg); setSettingsOpen(false); }}>
               <Text style={styles.settingSaveText}>保存并返回</Text>
@@ -950,7 +985,7 @@ function App(): React.JSX.Element {
 
       {/* 全屏播放页 - 酷狗概念版风格 */}
       <Modal visible={playerOpen} animationType="slide" onRequestClose={() => setPlayerOpen(false)}>
-        <View style={styles.playerScreen}>
+        <View style={[styles.playerScreen, { backgroundColor: activeTheme.bg }]}>
           <View style={styles.playerTopBg} />
           <Animated.View style={[styles.playerAura, { opacity: 0.35 }]} />
           <View style={styles.playerHeadRow}>
@@ -1135,6 +1170,9 @@ const styles = StyleSheet.create({
   settingName: { color: COLORS.text, fontSize: 13, fontWeight: '700' },
   settingDesc: { color: COLORS.sub, fontSize: 10, marginTop: 2 },
   settingInput: { marginTop: 6, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, backgroundColor: COLORS.panel2, color: COLORS.text, fontSize: 10 },
+  themeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8, marginBottom: 12 },
+  themeChip: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 12, borderWidth: 1.5 },
+  themeChipText: { fontSize: 11, fontWeight: '700' },
   settingSave: { marginTop: 12, paddingVertical: 10, borderRadius: 12, backgroundColor: COLORS.accent, alignItems: 'center' },
   settingSaveText: { color: '#04121a', fontWeight: '800', fontSize: 13 },
   filterRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, marginBottom: 8, gap: 10 },
